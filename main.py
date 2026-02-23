@@ -36,7 +36,7 @@ os.environ["GEMINI_API_KEY"] = api_key
 # BƯỚC 2: Khởi tạo AI model (Gemini)
 # ─────────────────────────────────────────
 llm = LLM(
-    model="gemini/gemini-2.0-flash-lite",
+    model="gemini/gemini-2.0-flash",
     api_key=api_key
 )
 

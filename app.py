@@ -300,7 +300,7 @@ if chay and task_input and api_key:
         os.environ["GEMINI_API_KEY"] = api_key
         os.environ["GOOGLE_API_KEY"] = api_key
         llm = LLM(
-            model="gemini/gemini-2.0-flash-lite",
+            model="gemini/gemini-2.0-flash",
             api_key=api_key
         )
 
