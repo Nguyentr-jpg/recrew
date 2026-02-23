@@ -183,9 +183,8 @@ with st.sidebar:
         "Gemini Model",
         options=[
             "gemini/gemini-2.0-flash",
-            "gemini/gemini-2.0-flash-lite",
-            "gemini/gemini-1.5-flash-latest",
             "gemini/gemini-2.5-flash-preview-04-17",
+            "gemini/gemini-2.5-pro-preview-05-06",
         ],
         index=0,
         help="Nếu bị lỗi 429 (quota exceeded), thử đổi sang model khác"
@@ -449,7 +448,7 @@ if chay and task_input and api_key:
             st.error(
                 "❌ **Lỗi 429 - Vượt quota API (Rate Limit)**\n\n"
                 "Bạn đã dùng hết quota miễn phí của Google Gemini. Hãy thử:\n"
-                "1. **Đổi model** ở sidebar sang `gemini-2.0-flash` hoặc `gemini-1.5-flash-latest`\n"
+                "1. **Đổi model** ở sidebar sang `gemini-2.5-flash-preview-04-17`\n"
                 "2. **Chờ một lúc** rồi thử lại (quota reset theo phút/ngày)\n"
                 "3. **Nâng cấp** Google AI Studio lên gói có billing\n\n"
                 f"Chi tiết: `{err_msg[:200]}`"
