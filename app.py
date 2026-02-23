@@ -297,10 +297,11 @@ if chay and task_input and api_key:
         # Khởi tạo LLM
         status_text.markdown("⚙️ Khởi tạo AI model...")
         progress_bar.progress(5)
-        os.environ["GEMINI_API_KEY"] = api_key
         os.environ["GOOGLE_API_KEY"] = api_key
+        # Remove GEMINI_API_KEY to avoid conflicts
+        os.environ.pop("GEMINI_API_KEY", None)
         llm = LLM(
-            model="gemini-1.5-flash-latest",
+            model="gemini-1.5-flash",
             api_key=api_key
         )
 

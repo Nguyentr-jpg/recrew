@@ -30,13 +30,15 @@ print("  🚀 ReCrew AI Team - Khởi động")
 print("="*50)
 
 api_key = input("\n🔑 Dán Gemini API key của mày vào đây: ").strip()
-os.environ["GEMINI_API_KEY"] = api_key
+os.environ["GOOGLE_API_KEY"] = api_key
+# Remove GEMINI_API_KEY to use GOOGLE_API_KEY only
+os.environ.pop("GEMINI_API_KEY", None)
 
 # ─────────────────────────────────────────
 # BƯỚC 2: Khởi tạo AI model (Gemini)
 # ─────────────────────────────────────────
 llm = LLM(
-    model="gemini-1.5-flash-latest",
+    model="gemini-1.5-flash",
     api_key=api_key
 )
 
