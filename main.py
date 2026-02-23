@@ -37,6 +37,7 @@ os.environ["GEMINI_API_KEY"] = api_key
 # ─────────────────────────────────────────
 llm = LLM(
     model="gemini-1.5-flash",
+    provider="google",
     api_key=api_key
 )
 
