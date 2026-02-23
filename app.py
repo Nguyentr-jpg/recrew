@@ -299,7 +299,7 @@ if chay and task_input and api_key:
         progress_bar.progress(5)
         os.environ["GEMINI_API_KEY"] = api_key
         os.environ["GOOGLE_API_KEY"] = api_key
-        llm = LLM(model="gemini/gemini-1.5-flash", api_key=api_key)
+        llm = LLM(model="gemini-1.5-flash", api_key=api_key)
 
         # Tạo agents
         status_text.markdown("👥 Tập hợp team...")
