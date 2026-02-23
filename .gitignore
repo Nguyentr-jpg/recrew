@@ -1,0 +1,25 @@
+# API Keys - KHÔNG BAO GIỜ commit file này
+.env
+config/.env
+*.env
+
+# Kết quả output (không cần thiết trên GitHub)
+output/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
