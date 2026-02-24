@@ -145,46 +145,58 @@ st.markdown("""
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       ⚠️  QUAN TRỌNG: ĐỪNG thêm "header { visibility: hidden }" vào đây!
-       Trong Streamlit 1.32+, nút toggle sidebar nằm TRONG thẻ <header>.
-       Nếu ẩn toàn bộ header → nút toggle bị ẩn → sidebar không mở được.
-       Chỉ được ẩn từng element cụ thể bên dưới.
+       ⚠️  ĐỪNG dùng "header { visibility/display: hidden/none }"!
+       Streamlit 1.32+: nút toggle sidebar nằm TRONG <header>.
+       Ẩn header = ẩn nút toggle = không mở sidebar được.
+       Giải pháp: giữ header, làm trong suốt, chỉ style nút toggle.
        ═══════════════════════════════════════════════════════════════ */
-    /* Ẩn Streamlit branding (menu + footer + toolbar deploy button) */
+
+    /* Header trong suốt – không ẩn để giữ nút toggle sidebar */
+    [data-testid="stHeader"] {
+        background: transparent !important;
+        border-bottom: none !important;
+    }
+    /* Ẩn các thứ trong header mà không phải toggle sidebar */
+    [data-testid="stToolbar"] { display: none !important; }
+    [data-testid="stDeployButton"] { display: none !important; }
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    [data-testid="stToolbar"] { visibility: hidden; }
-    [data-testid="stDeployButton"] { display: none; }
-    /* Đảm bảo sidebar và toggle luôn hiển thị dù CSS nào khác can thiệp */
-    [data-testid="stSidebar"] { visibility: visible !important; }
-    [data-testid="collapsedControl"] { visibility: visible !important; }
 
-    /* ── Sidebar toggle: tab dễ bấm ở cạnh trái ── */
-    /* Nút ">" khi sidebar đang đóng */
-    [data-testid="collapsedControl"] button {
+    /* ── Nút toggle sidebar: to, rõ, dễ bấm ── */
+    /* Nút mở sidebar (khi sidebar đang đóng) */
+    [data-testid="collapsedControl"],
+    [data-testid="stHeader"] button[aria-label*="idebar"],
+    [data-testid="stHeader"] button[title*="idebar"] {
+        visibility: visible !important;
+    }
+    [data-testid="collapsedControl"] button,
+    [data-testid="stHeader"] button[aria-label*="idebar"],
+    [data-testid="stHeader"] button[title*="idebar"] {
         background: linear-gradient(135deg, #667eea, #764ba2) !important;
         color: white !important;
         border: none !important;
-        border-radius: 0 10px 10px 0 !important;
-        width: 28px !important;
-        height: 56px !important;
-        box-shadow: 3px 0 12px rgba(102,126,234,0.5) !important;
-        transition: width 0.2s, box-shadow 0.2s !important;
+        border-radius: 8px !important;
+        min-width: 42px !important;
+        height: 42px !important;
+        font-size: 18px !important;
+        box-shadow: 0 2px 12px rgba(102,126,234,0.6) !important;
+        transition: transform 0.15s, box-shadow 0.15s !important;
+        cursor: pointer !important;
     }
-    [data-testid="collapsedControl"] button:hover {
-        width: 36px !important;
-        box-shadow: 4px 0 18px rgba(102,126,234,0.8) !important;
+    [data-testid="collapsedControl"] button:hover,
+    [data-testid="stHeader"] button[aria-label*="idebar"]:hover {
+        transform: scale(1.1) !important;
+        box-shadow: 0 4px 20px rgba(102,126,234,0.9) !important;
     }
-    /* Nút "<" bên trong sidebar khi đang mở */
-    [data-testid="stSidebarCollapseButton"] button,
-    [data-testid="stSidebar"] [data-testid="collapsedControl"] button {
+    /* Nút đóng sidebar (bên trong sidebar) */
+    [data-testid="stSidebarCollapseButton"] button {
         background: linear-gradient(135deg, #667eea, #764ba2) !important;
         color: white !important;
         border: none !important;
-        border-radius: 10px 0 0 10px !important;
-        width: 28px !important;
-        height: 56px !important;
-        box-shadow: -3px 0 12px rgba(102,126,234,0.5) !important;
+        border-radius: 8px !important;
+        min-width: 42px !important;
+        height: 42px !important;
+        box-shadow: 0 2px 12px rgba(102,126,234,0.6) !important;
     }
 </style>
 """, unsafe_allow_html=True)
