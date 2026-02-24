@@ -551,15 +551,18 @@ elif chay and not api_key:
 # ─────────────────────────────────────────
 # DEMO GAME
 # ─────────────────────────────────────────
+import streamlit.components.v1 as _components
+
+_TETRIS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games", "tetris.html")
+
 st.markdown("---")
-with st.expander("🎮 Tetris Demo – thử game AI vừa tạo", expanded=False):
-    st.caption("Nhấn vào canvas → dùng bàn phím: ← → di chuyển | ↓ soft drop | Space hard drop | X xoay | H giữ | P pause | R restart")
-    _tetris_html = open(
-        os.path.join(os.path.dirname(__file__), "games", "tetris.html"),
-        encoding="utf-8"
-    ).read()
-    import streamlit.components.v1 as _components
-    _components.html(_tetris_html, height=700, scrolling=False)
+st.markdown("### 🎮 Tetris Demo")
+st.caption("Nhấn vào canvas → dùng bàn phím: ← → di chuyển | ↓ soft drop | Space hard drop | X/C xoay phải | Z xoay trái | H giữ | P pause | R restart")
+if os.path.exists(_TETRIS_PATH):
+    _tetris_html = open(_TETRIS_PATH, encoding="utf-8").read()
+    _components.html(_tetris_html, height=720, scrolling=False)
+else:
+    st.error(f"Không tìm thấy file game tại: {_TETRIS_PATH}")
 
 # ─────────────────────────────────────────
 # FOOTER
