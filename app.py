@@ -178,12 +178,25 @@ with st.sidebar:
     st.metric("Task đã xử lý", st.session_state.task_count)
 
     st.markdown("---")
+    st.markdown("### 🤖 Chọn Model")
+    selected_model = st.selectbox(
+        "Gemini Model",
+        options=[
+            "gemini/gemini-2.5-flash",
+            "gemini/gemini-2.5-flash-lite",
+            "gemini/gemini-2.5-pro",
+        ],
+        index=0,
+        help="Nếu bị lỗi 429 (quota exceeded), thử đổi sang model khác"
+    )
+
+    st.markdown("---")
     st.markdown("### ℹ️ Về ReCrew")
     st.markdown("""
     Team AI tự động làm việc với nhau để hoàn thành task phần mềm.
 
     **Powered by:**
-    - Google Gemini 1.5 Flash
+    - Google Gemini 2.5 Flash
     - CrewAI Framework
     """)
 
@@ -300,7 +313,7 @@ if chay and task_input and api_key:
         os.environ["GEMINI_API_KEY"] = api_key
         os.environ["GOOGLE_API_KEY"] = api_key
         llm = LLM(
-            model="gemini/gemini-2.0-flash",
+            model=selected_model,
             api_key=api_key
         )
 
@@ -430,8 +443,25 @@ if chay and task_input and api_key:
             st.success("✅ File cũng đã lưu tại: `output/ket_qua.md`")
 
     except Exception as e:
-        st.error(f"❌ Lỗi: {str(e)}")
-        add_log(f"❌ Lỗi: {str(e)}")
+        err_msg = str(e)
+        if "429" in err_msg or "quota" in err_msg.lower() or "rate" in err_msg.lower():
+            st.error(
+                "❌ **Lỗi 429 - Vượt quota API (Rate Limit)**\n\n"
+                "Bạn đã dùng hết quota miễn phí của Google Gemini. Hãy thử:\n"
+                "1. **Đổi model** ở sidebar sang `gemini-2.5-flash-preview-04-17`\n"
+                "2. **Chờ một lúc** rồi thử lại (quota reset theo phút/ngày)\n"
+                "3. **Nâng cấp** Google AI Studio lên gói có billing\n\n"
+                f"Chi tiết: `{err_msg[:200]}`"
+            )
+        elif "404" in err_msg or "not found" in err_msg.lower():
+            st.error(
+                "❌ **Lỗi 404 - Model không tồn tại**\n\n"
+                "Model bạn chọn không được hỗ trợ. Hãy đổi sang model khác ở sidebar.\n\n"
+                f"Chi tiết: `{err_msg[:200]}`"
+            )
+        else:
+            st.error(f"❌ Lỗi: {err_msg}")
+        add_log(f"❌ Lỗi: {err_msg}")
 
     finally:
         st.session_state.is_running = False
