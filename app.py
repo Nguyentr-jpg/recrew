@@ -460,48 +460,88 @@ if chay and task_input and api_key:
 
         task_nghien_cuu = Task(
             description=f"""
-            Nghiên cứu và đề xuất giải pháp kỹ thuật tốt nhất cho yêu cầu:
+            Phân tích yêu cầu sau và đề xuất giải pháp kỹ thuật cụ thể:
             {task_input}
-            Đề xuất: công nghệ/thư viện nên dùng, kiến trúc, lưu ý quan trọng.
+
+            Xác định rõ:
+            - Đây là loại task gì? (game/web → HTML+JS | script/API/tool → Python)
+            - Công nghệ/thư viện cụ thể nên dùng và lý do
+            - Kiến trúc ngắn gọn (không quá 5 gạch đầu dòng)
+            - Những lưu ý kỹ thuật quan trọng nhất
             """,
-            expected_output="Báo cáo nghiên cứu kỹ thuật chi tiết với khuyến nghị cụ thể",
+            expected_output="Báo cáo kỹ thuật ngắn gọn: loại task, tech stack, kiến trúc, lưu ý",
             agent=researcher
         )
 
         task_lap_trinh = Task(
             description=f"""
-            Dựa trên nghiên cứu, viết code Python hoàn chỉnh cho: {task_input}
-            Yêu cầu: chạy được, có comment, xử lý lỗi cơ bản, code sạch.
+            Viết CODE HOÀN CHỈNH cho yêu cầu: {task_input}
+
+            QUY TẮC BẮT BUỘC:
+            - Đọc kết quả nghiên cứu để biết nên dùng ngôn ngữ/framework nào
+            - Nếu task liên quan game, web, UI, dashboard → viết HTML file hoàn chỉnh (HTML+CSS+JS trong 1 file)
+            - Nếu task liên quan script, automation, API, data → viết Python hoàn chỉnh
+            - Code phải CHẠY ĐƯỢC ngay khi người dùng copy ra file và mở/chạy
+            - KHÔNG viết pseudocode, KHÔNG mô tả dài dòng, KHÔNG placeholder
+            - Đặt toàn bộ code trong 1 code block duy nhất
+            - Sau code block: viết 2-3 dòng hướng dẫn chạy ngắn gọn
             """,
-            expected_output="Code Python hoàn chỉnh kèm hướng dẫn sử dụng",
+            expected_output="Một code block hoàn chỉnh chạy được ngay, kèm 2-3 dòng hướng dẫn",
             agent=developer,
             context=[task_nghien_cuu]
         )
 
         task_review = Task(
-            description="Review code: tìm bug, lỗ hổng bảo mật, đề xuất cải thiện cụ thể.",
-            expected_output="Báo cáo review với danh sách vấn đề và đề xuất",
+            description="""
+            Review code vừa được viết. Tập trung vào:
+            - Bug hoặc lỗi logic có thể xảy ra
+            - Vấn đề bảo mật (nếu có)
+            - Code có chạy được không (syntax error, import thiếu, v.v.)
+            - Đề xuất cải thiện cụ thể (không quá 5 điểm)
+
+            QUAN TRỌNG: Nếu code cần sửa, hãy đưa ra đoạn code đã sửa cụ thể.
+            """,
+            expected_output="Danh sách vấn đề (nếu có) + đoạn code sửa cụ thể (nếu cần)",
             agent=reviewer,
             context=[task_lap_trinh]
         )
 
         task_test = Task(
-            description="Viết test case: trường hợp bình thường, edge case, trường hợp lỗi.",
-            expected_output="Danh sách test case đầy đủ với kết quả dự kiến",
+            description="""
+            Dựa trên code đã viết, liệt kê 5-8 test case quan trọng nhất:
+            - 3 test case bình thường (happy path)
+            - 2-3 edge case
+            - 1-2 trường hợp lỗi
+
+            Format mỗi test case: Tên | Input | Expected Output | Pass/Fail dự kiến
+            """,
+            expected_output="Bảng test case ngắn gọn, rõ ràng",
             agent=qa_tester,
             context=[task_lap_trinh, task_review]
         )
 
         task_tong_hop = Task(
             description="""
-            Tổng hợp kết quả team thành báo cáo cuối:
-            1. Tóm tắt giải pháp
-            2. Code hoàn chỉnh
-            3. Hướng dẫn sử dụng từng bước
-            4. Danh sách test case
-            5. Điểm cần lưu ý
+            Tổng hợp kết quả. Output PHẢI theo đúng format sau:
+
+            ## ✅ Kết quả
+
+            ### 📋 Tóm tắt
+            [1 đoạn mô tả ngắn về giải pháp]
+
+            ### 💻 Code hoàn chỉnh
+            [COPY NGUYÊN XI toàn bộ code từ Lập Trình Viên vào đây — KHÔNG rút gọn, KHÔNG thay bằng mô tả]
+
+            ### 🚀 Cách chạy
+            [Hướng dẫn từng bước]
+
+            ### 🧪 Test case chính
+            [Tóm tắt test case từ QA]
+
+            ### ⚠️ Lưu ý
+            [Các điểm cần chú ý từ Reviewer]
             """,
-            expected_output="Báo cáo tổng hợp hoàn chỉnh",
+            expected_output="Báo cáo theo đúng format trên, bao gồm code đầy đủ không rút gọn",
             agent=team_lead,
             context=[task_nghien_cuu, task_lap_trinh, task_review, task_test]
         )
@@ -553,40 +593,83 @@ if chay and task_input and api_key:
         add_log("─" * 40)
         add_log("✅ Team hoàn thành task!")
 
-        # Lưu file
+        result_text = str(ket_qua)
+
+        # Lấy thêm code trực tiếp từ output của Developer (task index 1)
+        dev_raw = ""
+        try:
+            t_out = crew.tasks[1].output
+            dev_raw = str(t_out.raw) if hasattr(t_out, "raw") and t_out.raw else str(t_out)
+        except Exception:
+            pass
+
+        # Tìm code HTML/game – ưu tiên từ kết quả đầy đủ, fallback sang dev output
+        game_html = _extract_game_html(result_text) or _extract_game_html(dev_raw)
+
+        # Tìm code Python nếu không có HTML
+        py_code = None
+        if not game_html:
+            py_blocks = re.findall(r'```(?:python|py)\n(.*?)\n```', result_text + "\n" + dev_raw, re.DOTALL)
+            if py_blocks:
+                py_code = py_blocks[0]
+
+        # Lưu file markdown
         os.makedirs("output", exist_ok=True)
         with open("output/ket_qua.md", "w", encoding="utf-8") as out:
             out.write(f"# Kết quả ReCrew\n\n**Task:** {task_input}\n\n---\n\n{ket_qua}")
+
+        # Lưu code ra file thực nếu có
+        if game_html:
+            with open("output/result.html", "w", encoding="utf-8") as f:
+                f.write(game_html)
+        elif py_code:
+            with open("output/result.py", "w", encoding="utf-8") as f:
+                f.write(py_code)
 
         # Hiển thị kết quả
         st.markdown("---")
         st.markdown("### ✅ Kết quả")
 
-        result_text = str(ket_qua)
-        game_html = _extract_game_html(result_text)
-
         if game_html:
             tab_result, tab_game, tab_download = st.tabs(
-                ["📄 Kết quả đầy đủ", "🎮 Chạy Game", "💾 Tải về"]
+                ["📄 Báo cáo đầy đủ", "▶️ Chạy ngay", "💾 Tải về"]
             )
             with tab_game:
-                st.info("💡 Nhấn vào canvas rồi dùng bàn phím để chơi. Game chạy trực tiếp trong trình duyệt.")
+                st.info("💡 Nhấn vào canvas rồi dùng bàn phím để tương tác. Chạy trực tiếp trong trình duyệt.")
                 import streamlit.components.v1 as components
                 components.html(game_html, height=650, scrolling=False)
         else:
-            tab_result, tab_download = st.tabs(["📄 Kết quả đầy đủ", "💾 Tải về"])
+            tab_result, tab_download = st.tabs(["📄 Báo cáo đầy đủ", "💾 Tải về"])
 
         with tab_result:
             st.markdown(result_text)
 
         with tab_download:
+            # Download markdown
             st.download_button(
-                label="⬇️ Tải kết quả (.md)",
+                label="⬇️ Tải báo cáo (.md)",
                 data=f"# Kết quả ReCrew\n\n**Task:** {task_input}\n\n---\n\n{ket_qua}",
                 file_name="recrew_ket_qua.md",
                 mime="text/markdown"
             )
-            st.success("✅ File cũng đã lưu tại: `output/ket_qua.md`")
+            # Download file code thực
+            if game_html:
+                st.download_button(
+                    label="⬇️ Tải code HTML (chạy được ngay)",
+                    data=game_html,
+                    file_name="result.html",
+                    mime="text/html"
+                )
+                st.success("✅ Tải file `result.html` → mở bằng trình duyệt là chạy được ngay!")
+            elif py_code:
+                st.download_button(
+                    label="⬇️ Tải code Python (chạy được ngay)",
+                    data=py_code,
+                    file_name="result.py",
+                    mime="text/plain"
+                )
+                st.success("✅ Tải file `result.py` → chạy bằng `python result.py`!")
+            st.info("📁 File cũng đã lưu tại thư mục `output/`")
 
     except Exception as e:
         err_msg = str(e)
