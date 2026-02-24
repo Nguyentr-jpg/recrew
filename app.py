@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import os
 import re
 from crewai import Crew, Task, LLM
@@ -144,50 +145,72 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* ═══════════════════════════════════════════════════════════════
-       ⚠️  QUAN TRỌNG: ĐỪNG thêm "header { visibility: hidden }" vào đây!
-       Trong Streamlit 1.32+, nút toggle sidebar nằm TRONG thẻ <header>.
-       Nếu ẩn toàn bộ header → nút toggle bị ẩn → sidebar không mở được.
-       Chỉ được ẩn từng element cụ thể bên dưới.
-       ═══════════════════════════════════════════════════════════════ */
-    /* Ẩn Streamlit branding (menu + footer + toolbar deploy button) */
+    /* Ẩn branding Streamlit – KHÔNG ẩn header/toolbar vì chứa sidebar toggle */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    [data-testid="stToolbar"] { visibility: hidden; }
-    [data-testid="stDeployButton"] { display: none; }
-    /* Đảm bảo sidebar và toggle luôn hiển thị dù CSS nào khác can thiệp */
-    [data-testid="stSidebar"] { visibility: visible !important; }
-    [data-testid="collapsedControl"] { visibility: visible !important; }
-
-    /* ── Sidebar toggle: tab dễ bấm ở cạnh trái ── */
-    /* Nút ">" khi sidebar đang đóng */
-    [data-testid="collapsedControl"] button {
-        background: linear-gradient(135deg, #667eea, #764ba2) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 0 10px 10px 0 !important;
-        width: 28px !important;
-        height: 56px !important;
-        box-shadow: 3px 0 12px rgba(102,126,234,0.5) !important;
-        transition: width 0.2s, box-shadow 0.2s !important;
-    }
-    [data-testid="collapsedControl"] button:hover {
-        width: 36px !important;
-        box-shadow: 4px 0 18px rgba(102,126,234,0.8) !important;
-    }
-    /* Nút "<" bên trong sidebar khi đang mở */
-    [data-testid="stSidebarCollapseButton"] button,
-    [data-testid="stSidebar"] [data-testid="collapsedControl"] button {
-        background: linear-gradient(135deg, #667eea, #764ba2) !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 10px 0 0 10px !important;
-        width: 28px !important;
-        height: 56px !important;
-        box-shadow: -3px 0 12px rgba(102,126,234,0.5) !important;
-    }
 </style>
 """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────
+# FLOATING SIDEBAR TOGGLE BUTTON (JS)
+# Dùng JS inject thay vì CSS selector để không phụ thuộc Streamlit version
+# ─────────────────────────────────────────
+components.html("""
+<script>
+(function() {
+    function addToggleBtn() {
+        var pd = window.parent ? window.parent.document : document;
+        if (pd.getElementById('recrew-sidebar-toggle')) return;
+
+        var btn = pd.createElement('button');
+        btn.id = 'recrew-sidebar-toggle';
+        btn.title = 'Mở / Đóng Cài đặt';
+        btn.innerHTML = '&#9776;';
+        btn.style.cssText = [
+            'position:fixed', 'top:50%', 'left:0',
+            'transform:translateY(-50%)',
+            'z-index:99999',
+            'background:linear-gradient(135deg,#667eea,#764ba2)',
+            'color:white', 'border:none',
+            'border-radius:0 12px 12px 0',
+            'width:36px', 'height:72px',
+            'font-size:20px', 'cursor:pointer',
+            'box-shadow:3px 0 18px rgba(102,126,234,0.7)',
+            'transition:width 0.15s ease',
+            'display:flex', 'align-items:center', 'justify-content:center'
+        ].join(';');
+
+        btn.onmouseenter = function(){ btn.style.width='48px'; };
+        btn.onmouseleave = function(){ btn.style.width='36px'; };
+
+        btn.onclick = function() {
+            // Thử tất cả selector có thể của Streamlit sidebar toggle
+            var selectors = [
+                'button[aria-label="Open sidebar"]',
+                'button[aria-label="Close sidebar"]',
+                'button[aria-label="open sidebar"]',
+                'button[aria-label="close sidebar"]',
+                '[data-testid="collapsedControl"] button',
+                '[data-testid="stSidebarCollapseButton"] button',
+                '[data-testid="stSidebar"] button',
+            ];
+            for (var i = 0; i < selectors.length; i++) {
+                var el = pd.querySelector(selectors[i]);
+                if (el) { el.click(); return; }
+            }
+        };
+
+        pd.body.appendChild(btn);
+    }
+
+    // Thử inject ngay + retry sau vài giây (Streamlit load chậm)
+    addToggleBtn();
+    [300, 800, 1500, 3000].forEach(function(t) {
+        setTimeout(addToggleBtn, t);
+    });
+})();
+</script>
+""", height=0)
 
 # ─────────────────────────────────────────
 # SIDEBAR - API KEY
