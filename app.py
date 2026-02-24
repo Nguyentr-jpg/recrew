@@ -146,8 +146,12 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Ẩn Streamlit branding */
-    #MainMenu, footer, header { visibility: hidden; }
+    /* Ẩn Streamlit branding – CHỈ ẩn menu và footer, KHÔNG ẩn header */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    /* Đảm bảo nút toggle sidebar và panel sidebar luôn hiện */
+    [data-testid="collapsedControl"] { visibility: visible !important; }
+    [data-testid="stSidebar"] { visibility: visible !important; }
 </style>
 """, unsafe_allow_html=True)
 
