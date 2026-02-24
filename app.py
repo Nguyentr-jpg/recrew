@@ -182,9 +182,9 @@ with st.sidebar:
     selected_model = st.selectbox(
         "Gemini Model",
         options=[
-            "gemini/gemini-2.0-flash",
-            "gemini/gemini-2.5-flash-preview-04-17",
-            "gemini/gemini-2.5-pro-preview-05-06",
+            "gemini/gemini-2.5-flash",
+            "gemini/gemini-2.5-flash-lite",
+            "gemini/gemini-2.5-pro",
         ],
         index=0,
         help="Nếu bị lỗi 429 (quota exceeded), thử đổi sang model khác"
@@ -196,7 +196,7 @@ with st.sidebar:
     Team AI tự động làm việc với nhau để hoàn thành task phần mềm.
 
     **Powered by:**
-    - Google Gemini 2.0 Flash
+    - Google Gemini 2.5 Flash
     - CrewAI Framework
     """)
 
@@ -444,19 +444,19 @@ if chay and task_input and api_key:
 
     except Exception as e:
         err_msg = str(e)
-        if "429" in err_msg or "quota" in err_msg.lower() or "rate" in err_msg.lower():
-            st.error(
-                "❌ **Lỗi 429 - Vượt quota API (Rate Limit)**\n\n"
-                "Bạn đã dùng hết quota miễn phí của Google Gemini. Hãy thử:\n"
-                "1. **Đổi model** ở sidebar sang `gemini-2.5-flash-preview-04-17`\n"
-                "2. **Chờ một lúc** rồi thử lại (quota reset theo phút/ngày)\n"
-                "3. **Nâng cấp** Google AI Studio lên gói có billing\n\n"
-                f"Chi tiết: `{err_msg[:200]}`"
-            )
-        elif "404" in err_msg or "not found" in err_msg.lower():
+        if "404" in err_msg or "not found" in err_msg.lower():
             st.error(
                 "❌ **Lỗi 404 - Model không tồn tại**\n\n"
                 "Model bạn chọn không được hỗ trợ. Hãy đổi sang model khác ở sidebar.\n\n"
+                f"Chi tiết: `{err_msg[:200]}`"
+            )
+        elif "429" in err_msg or "quota" in err_msg.lower() or "rate limit" in err_msg.lower():
+            st.error(
+                "❌ **Lỗi 429 - Vượt quota API (Rate Limit)**\n\n"
+                "Bạn đã dùng hết quota miễn phí của Google Gemini. Hãy thử:\n"
+                "1. **Đổi model** ở sidebar sang `gemini-2.5-flash-lite`\n"
+                "2. **Chờ một lúc** rồi thử lại (quota reset theo phút/ngày)\n"
+                "3. **Nâng cấp** Google AI Studio lên gói có billing\n\n"
                 f"Chi tiết: `{err_msg[:200]}`"
             )
         else:
