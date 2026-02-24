@@ -144,10 +144,12 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Ẩn Streamlit branding – dùng selector cụ thể để không ẩn sidebar toggle */
+    /* Ẩn Streamlit branding – chỉ ẩn menu và footer, KHÔNG ẩn header để sidebar toggle hoạt động */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    [data-testid="stHeader"] { visibility: hidden; }
+    /* Ẩn chỉ deploy button và toolbar trên header, giữ nguyên sidebar toggle */
+    [data-testid="stToolbar"] { visibility: hidden; }
+    [data-testid="stDeployButton"] { display: none; }
 </style>
 """, unsafe_allow_html=True)
 
