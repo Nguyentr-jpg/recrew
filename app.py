@@ -1,8 +1,6 @@
 import streamlit as st
 import os
-import sys
-import io
-from contextlib import redirect_stdout
+import re
 from crewai import Crew, Task, LLM
 from agents import (
     create_team_lead,
@@ -146,12 +144,20 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Ẩn Streamlit branding – CHỈ ẩn menu và footer, KHÔNG ẩn header */
+    /* ═══════════════════════════════════════════════════════════════
+       ⚠️  QUAN TRỌNG: ĐỪNG thêm "header { visibility: hidden }" vào đây!
+       Trong Streamlit 1.32+, nút toggle sidebar nằm TRONG thẻ <header>.
+       Nếu ẩn toàn bộ header → nút toggle bị ẩn → sidebar không mở được.
+       Chỉ được ẩn từng element cụ thể bên dưới.
+       ═══════════════════════════════════════════════════════════════ */
+    /* Ẩn Streamlit branding (menu + footer + toolbar deploy button) */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-    /* Đảm bảo nút toggle sidebar và panel sidebar luôn hiện */
-    [data-testid="collapsedControl"] { visibility: visible !important; }
+    [data-testid="stToolbar"] { visibility: hidden; }
+    [data-testid="stDeployButton"] { display: none; }
+    /* Đảm bảo sidebar và toggle luôn hiển thị dù CSS nào khác can thiệp */
     [data-testid="stSidebar"] { visibility: visible !important; }
+    [data-testid="collapsedControl"] { visibility: visible !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -186,9 +192,9 @@ with st.sidebar:
     selected_model = st.selectbox(
         "Gemini Model",
         options=[
-            "gemini/gemini-2.0-flash",
-            "gemini/gemini-2.5-flash-preview-04-17",
-            "gemini/gemini-2.5-pro-preview-05-06",
+            "gemini/gemini-2.5-flash",
+            "gemini/gemini-2.5-flash-lite",
+            "gemini/gemini-2.5-pro",
         ],
         index=0,
         help="Nếu bị lỗi 429 (quota exceeded), thử đổi sang model khác"
@@ -200,7 +206,7 @@ with st.sidebar:
     Team AI tự động làm việc với nhau để hoàn thành task phần mềm.
 
     **Powered by:**
-    - Google Gemini 2.0 Flash
+    - Google Gemini 2.5 Flash
     - CrewAI Framework
     """)
 
@@ -284,6 +290,65 @@ if goi_y:
     """)
 
 # ─────────────────────────────────────────
+# HELPER: trích xuất game HTML từ kết quả
+# ─────────────────────────────────────────
+def _extract_game_html(result_text: str):
+    """
+    Tìm code block JavaScript/HTML trong kết quả.
+    Nếu là Phaser game → wrap thành HTML hoàn chỉnh để chạy trong iframe.
+    Trả về HTML string hoặc None nếu không phát hiện.
+    """
+    # Tìm tất cả code block javascript / js
+    js_blocks = re.findall(r'```(?:javascript|js)\n(.*?)\n```', result_text, re.DOTALL)
+    # Tìm code block html
+    html_blocks = re.findall(r'```html\n(.*?)\n```', result_text, re.DOTALL)
+
+    if html_blocks:
+        # Nếu có sẵn HTML hoàn chỉnh, dùng luôn
+        full_html = html_blocks[0]
+        if '<html' in full_html.lower() or '<!doctype' in full_html.lower():
+            return full_html
+        # Nếu chỉ là đoạn HTML, bọc lại
+        return f"<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body>{full_html}</body></html>"
+
+    if js_blocks:
+        js_code = '\n\n'.join(js_blocks)
+        # Chỉ tạo Phaser wrapper nếu code dùng Phaser
+        if 'Phaser' in js_code or 'phaser' in js_code.lower():
+            return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Game Preview</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body {{ margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }}
+    canvas {{ display:block; }}
+  </style>
+</head>
+<body>
+  <div id="phaser-game"></div>
+  <script>
+{js_code}
+  </script>
+</body>
+</html>"""
+        # JS thuần (không phải Phaser) – wrap đơn giản
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Preview</title>
+<style>body{{margin:0;background:#111;color:#eee;font-family:monospace;}}</style>
+</head>
+<body><canvas id='gameCanvas'></canvas>
+<script>
+{js_code}
+</script>
+</body>
+</html>"""
+    return None
+
+
+# ─────────────────────────────────────────
 # CHẠY TEAM
 # ─────────────────────────────────────────
 if chay and task_input and api_key:
@@ -336,12 +401,6 @@ if chay and task_input and api_key:
         qa_tester  = create_qa_tester(llm)
         researcher = create_researcher(llm)
 
-        # Tasks
-        progress_bar.progress(15)
-        status_text.markdown("🔎 Nhà Nghiên Cứu đang tìm giải pháp...")
-        add_log("─" * 40)
-        add_log("🔎 Nhà Nghiên Cứu bắt đầu nghiên cứu...")
-
         task_nghien_cuu = Task(
             description=f"""
             Nghiên cứu và đề xuất giải pháp kỹ thuật tốt nhất cho yêu cầu:
@@ -390,30 +449,47 @@ if chay and task_input and api_key:
             context=[task_nghien_cuu, task_lap_trinh, task_review, task_test]
         )
 
-        crew = Crew(
-            agents=[researcher, developer, reviewer, qa_tester, team_lead],
-            tasks=[task_nghien_cuu, task_lap_trinh, task_review, task_test, task_tong_hop],
-            verbose=False
-        )
-
-        # Chạy từng bước với cập nhật UI
-        buoc = [
-            (20,  "🔎 Nhà Nghiên Cứu đang nghiên cứu..."),
-            (40,  "💻 Lập Trình Viên đang viết code..."),
-            (60,  "🔍 Kiểm Duyệt đang review code..."),
-            (80,  "🧪 QA Tester đang viết test case..."),
-            (95,  "👑 Trưởng Nhóm đang tổng hợp kết quả..."),
+        # Nhãn hiển thị khi mỗi task hoàn thành và bước tiếp theo
+        _done_labels = [
+            "✅ Nhà Nghiên Cứu hoàn thành nghiên cứu",
+            "✅ Lập Trình Viên hoàn thành viết code",
+            "✅ Kiểm Duyệt hoàn thành review",
+            "✅ QA Tester hoàn thành test case",
+            "✅ Trưởng Nhóm hoàn thành tổng hợp",
         ]
+        _next_steps = [
+            (40, "💻 Lập Trình Viên đang viết code..."),
+            (60, "🔍 Kiểm Duyệt đang review code..."),
+            (80, "🧪 QA Tester đang viết test case..."),
+            (95, "👑 Trưởng Nhóm đang tổng hợp kết quả..."),
+        ]
+        _step = [0]  # list để closure có thể ghi
 
-        # Capture output
-        f = io.StringIO()
-        with redirect_stdout(f):
-            for pct, msg in buoc:
+        def on_task_complete(task_output):
+            idx = _step[0]
+            if idx < len(_done_labels):
+                add_log(_done_labels[idx])
+            if idx < len(_next_steps):
+                pct, msg = _next_steps[idx]
                 progress_bar.progress(pct)
                 status_text.markdown(f"**{msg}**")
                 add_log(msg)
+            _step[0] += 1
 
-            ket_qua = crew.kickoff()
+        crew = Crew(
+            agents=[researcher, developer, reviewer, qa_tester, team_lead],
+            tasks=[task_nghien_cuu, task_lap_trinh, task_review, task_test, task_tong_hop],
+            verbose=False,
+            task_callback=on_task_complete,
+        )
+
+        # Hiện trạng thái bước 1 trước khi chạy
+        progress_bar.progress(15)
+        status_text.markdown("**🔎 Nhà Nghiên Cứu đang nghiên cứu...**")
+        add_log("─" * 40)
+        add_log("🔎 Nhà Nghiên Cứu bắt đầu nghiên cứu...")
+
+        ket_qua = crew.kickoff()
 
         progress_bar.progress(100)
         status_text.markdown("✅ **Hoàn thành!**")
@@ -429,15 +505,24 @@ if chay and task_input and api_key:
         st.markdown("---")
         st.markdown("### ✅ Kết quả")
 
-        tab1, tab2 = st.tabs(["📄 Kết quả đầy đủ", "💾 Tải về"])
+        result_text = str(ket_qua)
+        game_html = _extract_game_html(result_text)
 
-        with tab1:
-            st.markdown(
-                f'<div class="result-box">{str(ket_qua)}</div>',
-                unsafe_allow_html=True
+        if game_html:
+            tab_result, tab_game, tab_download = st.tabs(
+                ["📄 Kết quả đầy đủ", "🎮 Chạy Game", "💾 Tải về"]
             )
+            with tab_game:
+                st.info("💡 Nhấn vào canvas rồi dùng bàn phím để chơi. Game chạy trực tiếp trong trình duyệt.")
+                import streamlit.components.v1 as components
+                components.html(game_html, height=650, scrolling=False)
+        else:
+            tab_result, tab_download = st.tabs(["📄 Kết quả đầy đủ", "💾 Tải về"])
 
-        with tab2:
+        with tab_result:
+            st.markdown(result_text)
+
+        with tab_download:
             st.download_button(
                 label="⬇️ Tải kết quả (.md)",
                 data=f"# Kết quả ReCrew\n\n**Task:** {task_input}\n\n---\n\n{ket_qua}",
@@ -448,19 +533,19 @@ if chay and task_input and api_key:
 
     except Exception as e:
         err_msg = str(e)
-        if "429" in err_msg or "quota" in err_msg.lower() or "rate" in err_msg.lower():
-            st.error(
-                "❌ **Lỗi 429 - Vượt quota API (Rate Limit)**\n\n"
-                "Bạn đã dùng hết quota miễn phí của Google Gemini. Hãy thử:\n"
-                "1. **Đổi model** ở sidebar sang `gemini-2.5-flash-preview-04-17`\n"
-                "2. **Chờ một lúc** rồi thử lại (quota reset theo phút/ngày)\n"
-                "3. **Nâng cấp** Google AI Studio lên gói có billing\n\n"
-                f"Chi tiết: `{err_msg[:200]}`"
-            )
-        elif "404" in err_msg or "not found" in err_msg.lower():
+        if "404" in err_msg or "not found" in err_msg.lower():
             st.error(
                 "❌ **Lỗi 404 - Model không tồn tại**\n\n"
                 "Model bạn chọn không được hỗ trợ. Hãy đổi sang model khác ở sidebar.\n\n"
+                f"Chi tiết: `{err_msg[:200]}`"
+            )
+        elif "429" in err_msg or "quota" in err_msg.lower() or "rate limit" in err_msg.lower():
+            st.error(
+                "❌ **Lỗi 429 - Vượt quota API (Rate Limit)**\n\n"
+                "Bạn đã dùng hết quota miễn phí của Google Gemini. Hãy thử:\n"
+                "1. **Đổi model** ở sidebar sang `gemini-2.5-flash-lite`\n"
+                "2. **Chờ một lúc** rồi thử lại (quota reset theo phút/ngày)\n"
+                "3. **Nâng cấp** Google AI Studio lên gói có billing\n\n"
                 f"Chi tiết: `{err_msg[:200]}`"
             )
         else:
@@ -474,6 +559,58 @@ elif chay and not task_input:
     st.warning("⚠️ Vui lòng nhập task trước khi chạy!")
 elif chay and not api_key:
     st.error("❌ Vui lòng nhập API Key ở thanh bên trái!")
+
+# ─────────────────────────────────────────
+# DEMO GAME  (inline – không phụ thuộc file ngoài)
+# ─────────────────────────────────────────
+import streamlit.components.v1 as _components
+
+_TETRIS_HTML = """<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Tetris – ReCrew</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0f1117;display:flex;flex-direction:column;align-items:center;
+         font-family:'Segoe UI',sans-serif;color:#e2e8f0}
+    h1{margin:14px 0 3px;font-size:1.6em;background:linear-gradient(135deg,#667eea,#764ba2);
+       -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    #controls{margin-bottom:8px;font-size:0.78em;color:#718096;text-align:center}
+    #ui-panel{display:flex;gap:20px;align-items:flex-start}
+    #score-panel{background:#1a1d27;border:1px solid #2d3748;border-radius:10px;padding:14px 18px;min-width:120px}
+    .sl{color:#718096;font-size:0.72em;text-transform:uppercase;letter-spacing:1px}
+    .sv{font-size:1.5em;font-weight:700;color:#e2e8f0;margin-bottom:10px}
+  </style>
+</head>
+<body>
+  <h1>⚡ Tetris – ReCrew</h1>
+  <div id="controls">← → Di chuyển &nbsp;|&nbsp; ↓ Soft drop &nbsp;|&nbsp; Space Hard drop
+    &nbsp;|&nbsp; X/C Xoay phải &nbsp;|&nbsp; Z Xoay trái &nbsp;|&nbsp; H Giữ &nbsp;|&nbsp; P Pause &nbsp;|&nbsp; R Restart</div>
+  <div id="ui-panel">
+    <div id="score-panel">
+      <div class="sl">Điểm</div><div class="sv" id="current-score">0</div>
+      <div class="sl">Cấp độ</div><div class="sv" id="current-level">1</div>
+      <div class="sl">Hàng</div><div class="sv" id="current-lines">0</div>
+    </div>
+    <div id="phaser-game"></div>
+  </div>
+<script>
+class Tetromino{constructor(scene,x,y,type,shape,color){this.scene=scene;this.type=type;this.color=color;this.originalShape=shape;this.currentShape=JSON.parse(JSON.stringify(shape));this.x=x;this.y=y;this.graphics=null;this.initGraphics()}initGraphics(){this.graphics=this.scene.add.graphics();this.graphics.setDepth(1);this.draw()}draw(){this.graphics.clear();this.graphics.setX(GameBoard.OX+this.x*GameBoard.GS);this.graphics.setY(GameBoard.OY+this.y*GameBoard.GS);this.graphics.fillStyle(this.color,1);for(let r=0;r<this.currentShape.length;r++)for(let c=0;c<this.currentShape[r].length;c++)if(this.currentShape[r][c]===1){this.graphics.fillRect(c*GameBoard.GS,r*GameBoard.GS,GameBoard.GS-1,GameBoard.GS-1);this.graphics.lineStyle(1,0xffffff,0.18);this.graphics.strokeRect(c*GameBoard.GS,r*GameBoard.GS,GameBoard.GS-1,GameBoard.GS-1)}}move(dx,dy){this.x+=dx;this.y+=dy;this.graphics.setX(GameBoard.OX+this.x*GameBoard.GS);this.graphics.setY(GameBoard.OY+this.y*GameBoard.GS)}rotateClockwise(){const s=this.currentShape,N=s.length;for(let i=0;i<N;i++)for(let j=i;j<N;j++)[s[i][j],s[j][i]]=[s[j][i],s[i][j]];for(let i=0;i<N;i++)s[i].reverse();this.draw()}rotateCounterClockwise(){const s=this.currentShape,N=s.length;s.reverse();for(let i=0;i<N;i++)for(let j=i;j<N;j++)[s[i][j],s[j][i]]=[s[j][i],s[i][j]];this.draw()}setShape(ns){this.currentShape=ns;this.draw()}getBlocks(){const b=[];for(let r=0;r<this.currentShape.length;r++)for(let c=0;c<this.currentShape[r].length;c++)if(this.currentShape[r][c]===1)b.push({x:this.x+c,y:this.y+r});return b}getColor(){return this.color}getType(){return this.type}destroy(){if(this.graphics){this.graphics.destroy();this.graphics=null}}}
+class GameBoard{static BW=10;static BH=20;static GS=28;static OX=0;static OY=0;static PIECES={'I':{shape:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],color:0x00ffff},'J':{shape:[[1,0,0],[1,1,1],[0,0,0]],color:0x3399ff},'L':{shape:[[0,0,1],[1,1,1],[0,0,0]],color:0xffa500},'O':{shape:[[1,1],[1,1]],color:0xffff00},'S':{shape:[[0,1,1],[1,1,0],[0,0,0]],color:0x44dd44},'T':{shape:[[0,1,0],[1,1,1],[0,0,0]],color:0xcc44cc},'Z':{shape:[[1,1,0],[0,1,1],[0,0,0]],color:0xff4444}};static _bag=[];static _fill(){GameBoard._bag=Object.keys(GameBoard.PIECES);for(let i=GameBoard._bag.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[GameBoard._bag[i],GameBoard._bag[j]]=[GameBoard._bag[j],GameBoard._bag[i]]}}static next(){if(!GameBoard._bag.length)GameBoard._fill();return GameBoard._bag.pop()}constructor(scene){this.scene=scene;this.grid=Array(GameBoard.BH).fill(0).map(()=>Array(GameBoard.BW).fill(0));this.lg=[];this.cur=null;this.nxt=GameBoard.next();this.hold=null;this.canHold=true;this.sm=new ScoreManager}initBoard(x,y){GameBoard.OX=x;GameBoard.OY=y;const g=this.scene.add.graphics();g.fillStyle(0x000000,0.6);g.fillRect(x,y,GameBoard.BW*GameBoard.GS,GameBoard.BH*GameBoard.GS);g.lineStyle(1,0x2d3748,1);for(let i=0;i<=GameBoard.BW;i++){g.moveTo(x+i*GameBoard.GS,y);g.lineTo(x+i*GameBoard.GS,y+GameBoard.BH*GameBoard.GS)}for(let i=0;i<=GameBoard.BH;i++){g.moveTo(x,y+i*GameBoard.GS);g.lineTo(x+GameBoard.BW*GameBoard.GS,y+i*GameBoard.GS)}g.strokePath();g.setDepth(0)}spawn(){const type=this.nxt;this.nxt=GameBoard.next();const d=GameBoard.PIECES[type];const sx=Math.floor((GameBoard.BW-d.shape[0].length)/2);this.cur=new Tetromino(this.scene,sx,0,type,d.shape,d.color);if(this.collide(this.cur)){this.cur.destroy();this.cur=null;return null}this.canHold=true;return this.cur}getCur(){return this.cur}collide(t){for(const{x,y}of t.getBlocks()){if(x<0||x>=GameBoard.BW||y>=GameBoard.BH)return true;if(y>=0&&this.grid[y][x]!==0)return true}return false}tryMove(dx,dy){if(!this.cur)return false;this.cur.move(dx,dy);if(this.collide(this.cur)){this.cur.move(-dx,-dy);return false}return true}_kick(t){const ox=t.x,oy=t.y;for(const{dx,dy}of[{dx:1,dy:0},{dx:-1,dy:0},{dx:2,dy:0},{dx:-2,dy:0},{dx:0,dy:-1}]){t.x=ox+dx;t.y=oy+dy;if(!this.collide(t)){t.draw();return true}}t.x=ox;t.y=oy;return false}rotCW(){if(!this.cur)return false;const ss=JSON.parse(JSON.stringify(this.cur.currentShape)),sx=this.cur.x,sy=this.cur.y;this.cur.rotateClockwise();if(this.collide(this.cur)&&!this._kick(this.cur)){this.cur.x=sx;this.cur.y=sy;this.cur.setShape(ss);return false}return true}rotCCW(){if(!this.cur)return false;const ss=JSON.parse(JSON.stringify(this.cur.currentShape)),sx=this.cur.x,sy=this.cur.y;this.cur.rotateCounterClockwise();if(this.collide(this.cur)&&!this._kick(this.cur)){this.cur.x=sx;this.cur.y=sy;this.cur.setShape(ss);return false}return true}hardDrop(){let n=0;while(this.tryMove(0,1))n++;return n}lock(){if(!this.cur)return 0;for(const{x,y}of this.cur.getBlocks())if(y>=0)this.grid[y][x]=this.cur.getColor();this.cur.destroy();this.cur=null;const c=this._clear();this.sm.addLines(c);this.redraw();return c}_clear(){let n=0;for(let y=GameBoard.BH-1;y>=0;y--){if(this.grid[y].every(c=>c!==0)){this.grid.splice(y,1);this.grid.unshift(Array(GameBoard.BW).fill(0));n++;y++}}return n}redraw(){this.lg.forEach(g=>g.destroy());this.lg=[];for(let y=0;y<GameBoard.BH;y++)for(let x=0;x<GameBoard.BW;x++){const color=this.grid[y][x];if(color!==0){const g=this.scene.add.graphics();g.setX(GameBoard.OX+x*GameBoard.GS);g.setY(GameBoard.OY+y*GameBoard.GS);g.fillStyle(color,1);g.fillRect(0,0,GameBoard.GS-1,GameBoard.GS-1);g.lineStyle(1,0xffffff,0.12);g.strokeRect(0,0,GameBoard.GS-1,GameBoard.GS-1);g.setDepth(0);this.lg.push(g)}}}holdPiece(){if(!this.cur||!this.canHold)return;const ct=this.cur.getType();this.cur.destroy();this.cur=null;if(this.hold){const ht=this.hold;this.hold=ct;const d=GameBoard.PIECES[ht];const sx=Math.floor((GameBoard.BW-d.shape[0].length)/2);this.cur=new Tetromino(this.scene,sx,0,ht,d.shape,d.color);if(this.collide(this.cur)){this.cur.destroy();this.cur=null}}else{this.hold=ct;this.spawn()}this.canHold=false}getNxt(){return this.nxt}getHold(){return this.hold}reset(){this.grid=Array(GameBoard.BH).fill(0).map(()=>Array(GameBoard.BW).fill(0));this.lg.forEach(g=>g.destroy());this.lg=[];if(this.cur){this.cur.destroy();this.cur=null}this.nxt=GameBoard.next();this.hold=null;this.canHold=true;this.sm.reset();GameBoard._bag=[]}}
+class ScoreManager{constructor(){this.reset()}reset(){this.score=0;this.level=1;this.lines=0}addLines(n){if(!n)return;this.lines+=n;this.level=Math.floor(this.lines/10)+1;const p=[0,40,100,300,1200];this.score+=(p[n]||1200)*this.level}getScore(){return this.score}getLevel(){return this.level}getLines(){return this.lines}}
+class BootScene extends Phaser.Scene{constructor(){super({key:'BootScene'})}create(){this.scene.start('GameScene')}}
+class GameScene extends Phaser.Scene{constructor(){super({key:'GameScene'});this.board=null;this.isPaused=false;this.isGameOver=false;this.fallTimer=null;this.ghost=null}create(){this.isPaused=false;this.isGameOver=false;const W=this.sys.game.config.width,H=this.sys.game.config.height;const bw=GameBoard.BW*GameBoard.GS,bh=GameBoard.BH*GameBoard.GS;const bx=(W-bw)/2,by=(H-bh)/2;this.board=new GameBoard(this);this.board.initBoard(bx,by);this.ghost=this.add.graphics();this.ghost.setDepth(0);if(!this.board.spawn()){this._gameOver();return}this._input();this._startTimer();this._updateUI();this.add.text(bx+bw+12,by,'NEXT',{fontSize:'12px',fill:'#718096'});this.add.text(bx+bw+12,by+90,'HOLD',{fontSize:'12px',fill:'#718096'});this.nxtTxt=this.add.text(bx+bw+12,by+16,'',{fontSize:'12px',fill:'#e2e8f0'});this.holdTxt=this.add.text(bx+bw+12,by+106,'',{fontSize:'12px',fill:'#e2e8f0'});this.pauseTxt=null}_input(){const kb=this.input.keyboard,cur=kb.createCursorKeys();const K={x:kb.addKey('X'),z:kb.addKey('Z'),c:kb.addKey('C'),p:kb.addKey('P'),h:kb.addKey('H'),r:kb.addKey('R'),sp:kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE)};const ok=()=>!this.isPaused&&!this.isGameOver&&!!this.board.getCur();cur.left.on('down',()=>{if(ok())this.board.tryMove(-1,0)});cur.right.on('down',()=>{if(ok())this.board.tryMove(1,0)});cur.down.on('down',()=>{if(!ok())return;if(!this.board.tryMove(0,1))this._land()});const hd=()=>{if(!ok())return;this.board.hardDrop();this._land()};K.sp.on('down',hd);cur.up.on('down',hd);K.x.on('down',()=>{if(ok())this.board.rotCW()});K.c.on('down',()=>{if(ok())this.board.rotCW()});K.z.on('down',()=>{if(ok())this.board.rotCCW()});K.p.on('down',()=>this._pause());K.h.on('down',()=>{if(!ok())return;this.board.holdPiece();this._startTimer();this._updateUI()});K.r.on('down',()=>{if(this.isGameOver){this.board.reset();this.scene.restart()}})}_calcGhost(){const t=this.board.getCur();if(!t)return null;const oy=t.y;while(true){t.y++;if(this.board.collide(t)){t.y--;break}}const gy=t.y;t.y=oy;return{shape:t.currentShape,x:t.x,y:gy}}_drawGhost(){this.ghost.clear();const g=this._calcGhost();if(!g)return;const t=this.board.getCur();if(g.y===t.y)return;this.ghost.lineStyle(1,0xffffff,0.22);for(let r=0;r<g.shape.length;r++)for(let c=0;c<g.shape[r].length;c++)if(g.shape[r][c]===1){const px=GameBoard.OX+(g.x+c)*GameBoard.GS,py=GameBoard.OY+(g.y+r)*GameBoard.GS;this.ghost.strokeRect(px,py,GameBoard.GS-1,GameBoard.GS-1)}}_startTimer(){if(this.fallTimer)this.fallTimer.remove();const iv=Math.max(80,1000-(this.board.sm.getLevel()-1)*80);this.fallTimer=this.time.addEvent({delay:iv,callback:()=>{if(this.isPaused||this.isGameOver)return;if(!this.board.tryMove(0,1))this._land()},loop:true})}_land(){this.board.lock();const n=this.board.spawn();this._updateUI();if(!n){this._gameOver();return}this._startTimer()}_pause(){if(this.isGameOver)return;this.isPaused=!this.isPaused;if(this.isPaused){this.fallTimer.paused=true;if(!this.pauseTxt)this.pauseTxt=this.add.text(this.sys.game.config.width/2,this.sys.game.config.height/2,'PAUSED\n(P tiếp tục)',{fontSize:'32px',fill:'#fff',align:'center'}).setOrigin(0.5).setDepth(20)}else{this.fallTimer.paused=false;if(this.pauseTxt){this.pauseTxt.destroy();this.pauseTxt=null}}}_gameOver(){this.isGameOver=true;if(this.fallTimer)this.fallTimer.remove();const cx=this.sys.game.config.width/2,cy=this.sys.game.config.height/2;this.add.text(cx,cy-40,'GAME OVER',{fontSize:'48px',fill:'#ff4444',fontStyle:'bold'}).setOrigin(0.5).setDepth(20);this.add.text(cx,cy+20,'Điểm: '+this.board.sm.getScore(),{fontSize:'26px',fill:'#fff'}).setOrigin(0.5).setDepth(20);this.add.text(cx,cy+58,'Nhấn R để chơi lại',{fontSize:'20px',fill:'#a0aec0'}).setOrigin(0.5).setDepth(20)}_updateUI(){const sm=this.board.sm;document.getElementById('current-score').innerText=sm.getScore();document.getElementById('current-level').innerText=sm.getLevel();document.getElementById('current-lines').innerText=sm.getLines();if(this.nxtTxt)this.nxtTxt.setText(this.board.getNxt()||'-');if(this.holdTxt)this.holdTxt.setText(this.board.getHold()||'-')}update(){if(!this.isPaused&&!this.isGameOver)this._drawGhost()}}
+new Phaser.Game({type:Phaser.AUTO,width:420,height:600,parent:'phaser-game',backgroundColor:'#0f1117',scene:[BootScene,GameScene]});
+</script>
+</body>
+</html>"""
+
+st.markdown("---")
+st.markdown("### 🎮 Tetris Demo")
+st.caption("Nhấn vào canvas → ← → di chuyển | ↓ soft drop | Space hard drop | X/C xoay phải | Z xoay trái | H giữ | P pause | R restart")
+_components.html(_TETRIS_HTML, height=720, scrolling=False)
 
 # ─────────────────────────────────────────
 # FOOTER
