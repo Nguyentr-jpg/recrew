@@ -1,10 +1,11 @@
-"""
-app.py — ReCrew Streamlit entry point
-Lean orchestration file. Logic thực sự nằm trong:
-  crew/   → workflow chạy AI team
-  utils/  → code extraction, settings, history
-  ui/     → CSS, sidebar, tetris demo
-"""
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
+# app.py — ReCrew Streamlit entry point
+# Logic thực sự nằm trong: crew/ · utils/ · ui/
 import os
 import streamlit as st
 import streamlit.components.v1 as components
@@ -29,8 +30,9 @@ inject_css()
 init_history()   # khởi tạo tất cả session_state keys 1 lần duy nhất
 
 # ─────────────────────────────────────────
-# SIDEBAR
+# SIDEBAR (placeholder để tìm phần cũ cần xóa)
 # ─────────────────────────────────────────
+# SIDEBAR
 api_key, selected_model = render_sidebar()
 
 # ─────────────────────────────────────────
