@@ -1,8 +1,6 @@
 import streamlit as st
 import os
-import sys
-import io
-from contextlib import redirect_stdout
+import re
 from crewai import Crew, Task, LLM
 from agents import (
     create_team_lead,
@@ -280,6 +278,65 @@ if goi_y:
     """)
 
 # ─────────────────────────────────────────
+# HELPER: trích xuất game HTML từ kết quả
+# ─────────────────────────────────────────
+def _extract_game_html(result_text: str):
+    """
+    Tìm code block JavaScript/HTML trong kết quả.
+    Nếu là Phaser game → wrap thành HTML hoàn chỉnh để chạy trong iframe.
+    Trả về HTML string hoặc None nếu không phát hiện.
+    """
+    # Tìm tất cả code block javascript / js
+    js_blocks = re.findall(r'```(?:javascript|js)\n(.*?)\n```', result_text, re.DOTALL)
+    # Tìm code block html
+    html_blocks = re.findall(r'```html\n(.*?)\n```', result_text, re.DOTALL)
+
+    if html_blocks:
+        # Nếu có sẵn HTML hoàn chỉnh, dùng luôn
+        full_html = html_blocks[0]
+        if '<html' in full_html.lower() or '<!doctype' in full_html.lower():
+            return full_html
+        # Nếu chỉ là đoạn HTML, bọc lại
+        return f"<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body>{full_html}</body></html>"
+
+    if js_blocks:
+        js_code = '\n\n'.join(js_blocks)
+        # Chỉ tạo Phaser wrapper nếu code dùng Phaser
+        if 'Phaser' in js_code or 'phaser' in js_code.lower():
+            return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Game Preview</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    body {{ margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }}
+    canvas {{ display:block; }}
+  </style>
+</head>
+<body>
+  <div id="phaser-game"></div>
+  <script>
+{js_code}
+  </script>
+</body>
+</html>"""
+        # JS thuần (không phải Phaser) – wrap đơn giản
+        return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Preview</title>
+<style>body{{margin:0;background:#111;color:#eee;font-family:monospace;}}</style>
+</head>
+<body><canvas id='gameCanvas'></canvas>
+<script>
+{js_code}
+</script>
+</body>
+</html>"""
+    return None
+
+
+# ─────────────────────────────────────────
 # CHẠY TEAM
 # ─────────────────────────────────────────
 if chay and task_input and api_key:
@@ -332,12 +389,6 @@ if chay and task_input and api_key:
         qa_tester  = create_qa_tester(llm)
         researcher = create_researcher(llm)
 
-        # Tasks
-        progress_bar.progress(15)
-        status_text.markdown("🔎 Nhà Nghiên Cứu đang tìm giải pháp...")
-        add_log("─" * 40)
-        add_log("🔎 Nhà Nghiên Cứu bắt đầu nghiên cứu...")
-
         task_nghien_cuu = Task(
             description=f"""
             Nghiên cứu và đề xuất giải pháp kỹ thuật tốt nhất cho yêu cầu:
@@ -386,30 +437,47 @@ if chay and task_input and api_key:
             context=[task_nghien_cuu, task_lap_trinh, task_review, task_test]
         )
 
-        crew = Crew(
-            agents=[researcher, developer, reviewer, qa_tester, team_lead],
-            tasks=[task_nghien_cuu, task_lap_trinh, task_review, task_test, task_tong_hop],
-            verbose=False
-        )
-
-        # Chạy từng bước với cập nhật UI
-        buoc = [
-            (20,  "🔎 Nhà Nghiên Cứu đang nghiên cứu..."),
-            (40,  "💻 Lập Trình Viên đang viết code..."),
-            (60,  "🔍 Kiểm Duyệt đang review code..."),
-            (80,  "🧪 QA Tester đang viết test case..."),
-            (95,  "👑 Trưởng Nhóm đang tổng hợp kết quả..."),
+        # Nhãn hiển thị khi mỗi task hoàn thành và bước tiếp theo
+        _done_labels = [
+            "✅ Nhà Nghiên Cứu hoàn thành nghiên cứu",
+            "✅ Lập Trình Viên hoàn thành viết code",
+            "✅ Kiểm Duyệt hoàn thành review",
+            "✅ QA Tester hoàn thành test case",
+            "✅ Trưởng Nhóm hoàn thành tổng hợp",
         ]
+        _next_steps = [
+            (40, "💻 Lập Trình Viên đang viết code..."),
+            (60, "🔍 Kiểm Duyệt đang review code..."),
+            (80, "🧪 QA Tester đang viết test case..."),
+            (95, "👑 Trưởng Nhóm đang tổng hợp kết quả..."),
+        ]
+        _step = [0]  # list để closure có thể ghi
 
-        # Capture output
-        f = io.StringIO()
-        with redirect_stdout(f):
-            for pct, msg in buoc:
+        def on_task_complete(task_output):
+            idx = _step[0]
+            if idx < len(_done_labels):
+                add_log(_done_labels[idx])
+            if idx < len(_next_steps):
+                pct, msg = _next_steps[idx]
                 progress_bar.progress(pct)
                 status_text.markdown(f"**{msg}**")
                 add_log(msg)
+            _step[0] += 1
 
-            ket_qua = crew.kickoff()
+        crew = Crew(
+            agents=[researcher, developer, reviewer, qa_tester, team_lead],
+            tasks=[task_nghien_cuu, task_lap_trinh, task_review, task_test, task_tong_hop],
+            verbose=False,
+            task_callback=on_task_complete,
+        )
+
+        # Hiện trạng thái bước 1 trước khi chạy
+        progress_bar.progress(15)
+        status_text.markdown("**🔎 Nhà Nghiên Cứu đang nghiên cứu...**")
+        add_log("─" * 40)
+        add_log("🔎 Nhà Nghiên Cứu bắt đầu nghiên cứu...")
+
+        ket_qua = crew.kickoff()
 
         progress_bar.progress(100)
         status_text.markdown("✅ **Hoàn thành!**")
@@ -425,15 +493,24 @@ if chay and task_input and api_key:
         st.markdown("---")
         st.markdown("### ✅ Kết quả")
 
-        tab1, tab2 = st.tabs(["📄 Kết quả đầy đủ", "💾 Tải về"])
+        result_text = str(ket_qua)
+        game_html = _extract_game_html(result_text)
 
-        with tab1:
-            st.markdown(
-                f'<div class="result-box">{str(ket_qua)}</div>',
-                unsafe_allow_html=True
+        if game_html:
+            tab_result, tab_game, tab_download = st.tabs(
+                ["📄 Kết quả đầy đủ", "🎮 Chạy Game", "💾 Tải về"]
             )
+            with tab_game:
+                st.info("💡 Nhấn vào canvas rồi dùng bàn phím để chơi. Game chạy trực tiếp trong trình duyệt.")
+                import streamlit.components.v1 as components
+                components.html(game_html, height=650, scrolling=False)
+        else:
+            tab_result, tab_download = st.tabs(["📄 Kết quả đầy đủ", "💾 Tải về"])
 
-        with tab2:
+        with tab_result:
+            st.markdown(result_text)
+
+        with tab_download:
             st.download_button(
                 label="⬇️ Tải kết quả (.md)",
                 data=f"# Kết quả ReCrew\n\n**Task:** {task_input}\n\n---\n\n{ket_qua}",
