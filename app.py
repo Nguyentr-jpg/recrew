@@ -144,8 +144,10 @@ st.markdown("""
         border-radius: 8px !important;
     }
 
-    /* Ẩn Streamlit branding */
-    #MainMenu, footer, header { visibility: hidden; }
+    /* Ẩn Streamlit branding – dùng selector cụ thể để không ẩn sidebar toggle */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    [data-testid="stHeader"] { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
