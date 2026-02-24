@@ -549,6 +549,19 @@ elif chay and not api_key:
     st.error("❌ Vui lòng nhập API Key ở thanh bên trái!")
 
 # ─────────────────────────────────────────
+# DEMO GAME
+# ─────────────────────────────────────────
+st.markdown("---")
+with st.expander("🎮 Tetris Demo – thử game AI vừa tạo", expanded=False):
+    st.caption("Nhấn vào canvas → dùng bàn phím: ← → di chuyển | ↓ soft drop | Space hard drop | X xoay | H giữ | P pause | R restart")
+    _tetris_html = open(
+        os.path.join(os.path.dirname(__file__), "games", "tetris.html"),
+        encoding="utf-8"
+    ).read()
+    import streamlit.components.v1 as _components
+    _components.html(_tetris_html, height=700, scrolling=False)
+
+# ─────────────────────────────────────────
 # FOOTER
 # ─────────────────────────────────────────
 st.markdown("---")
