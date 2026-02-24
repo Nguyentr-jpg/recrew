@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tetris – ReCrew</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0f1117;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+      color: #e2e8f0;
+    }
+    h1 {
+      margin: 18px 0 4px;
+      font-size: 1.8em;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #controls {
+      margin-bottom: 10px;
+      font-size: 0.82em;
+      color: #718096;
+      text-align: center;
+    }
+    #ui-panel {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      margin-top: 6px;
+    }
+    #score-panel {
+      background: #1a1d27;
+      border: 1px solid #2d3748;
+      border-radius: 12px;
+      padding: 16px 20px;
+      min-width: 130px;
+    }
+    .stat-label { color: #718096; font-size: 0.75em; text-transform: uppercase; letter-spacing: 1px; }
+    .stat-value { font-size: 1.6em; font-weight: 700; color: #e2e8f0; margin-bottom: 12px; }
+    #phaser-game canvas { border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>⚡ Tetris – ReCrew</h1>
+  <div id="controls">
+    ← → Di chuyển &nbsp;|&nbsp; ↓ Soft drop &nbsp;|&nbsp; Space / ↑ Hard drop
+    &nbsp;|&nbsp; X/C Xoay phải &nbsp;|&nbsp; Z Xoay trái &nbsp;|&nbsp; H Giữ &nbsp;|&nbsp; P Pause &nbsp;|&nbsp; R Restart
+  </div>
+
+  <div id="ui-panel">
+    <div id="score-panel">
+      <div class="stat-label">Điểm</div>
+      <div class="stat-value" id="current-score">0</div>
+      <div class="stat-label">Cấp độ</div>
+      <div class="stat-value" id="current-level">1</div>
+      <div class="stat-label">Hàng</div>
+      <div class="stat-value" id="current-lines">0</div>
+    </div>
+    <div id="phaser-game"></div>
+  </div>
+
+<script>
+// ──────────────── Tetromino ────────────────
+class Tetromino {
+    constructor(scene, x, y, type, shape, color) {
+        this.scene = scene;
+        this.type = type;
+        this.color = color;
+        this.originalShape = shape;
+        this.currentShape = JSON.parse(JSON.stringify(shape));
+        this.x = x;
+        this.y = y;
+        this.graphics = null;
+        this.initGraphics();
+    }
+
+    initGraphics() {
+        this.graphics = this.scene.add.graphics();
+        this.graphics.setDepth(1);
+        this.draw();
+    }
+
+    draw() {
+        this.graphics.clear();
+        this.graphics.setX(GameBoard.OFFSET_X + this.x * GameBoard.GRID_SIZE);
+        this.graphics.setY(GameBoard.OFFSET_Y + this.y * GameBoard.GRID_SIZE);
+        this.graphics.fillStyle(this.color, 1);
+        for (let row = 0; row < this.currentShape.length; row++) {
+            for (let col = 0; col < this.currentShape[row].length; col++) {
+                if (this.currentShape[row][col] === 1) {
+                    this.graphics.fillRect(col * GameBoard.GRID_SIZE, row * GameBoard.GRID_SIZE,
+                        GameBoard.GRID_SIZE - 1, GameBoard.GRID_SIZE - 1);
+                    this.graphics.lineStyle(1, 0xffffff, 0.2);
+                    this.graphics.strokeRect(col * GameBoard.GRID_SIZE, row * GameBoard.GRID_SIZE,
+                        GameBoard.GRID_SIZE - 1, GameBoard.GRID_SIZE - 1);
+                }
+            }
+        }
+    }
+
+    move(dx, dy) {
+        this.x += dx;
+        this.y += dy;
+        this.graphics.setX(GameBoard.OFFSET_X + this.x * GameBoard.GRID_SIZE);
+        this.graphics.setY(GameBoard.OFFSET_Y + this.y * GameBoard.GRID_SIZE);
+    }
+
+    rotateClockwise() {
+        const s = this.currentShape;
+        const N = s.length;
+        for (let i = 0; i < N; i++)
+            for (let j = i; j < N; j++)
+                [s[i][j], s[j][i]] = [s[j][i], s[i][j]];
+        for (let i = 0; i < N; i++) s[i].reverse();
+        this.draw();
+    }
+
+    rotateCounterClockwise() {
+        const s = this.currentShape;
+        const N = s.length;
+        // Reverse rows first, then transpose
+        s.reverse();
+        for (let i = 0; i < N; i++)
+            for (let j = i; j < N; j++)
+                [s[i][j], s[j][i]] = [s[j][i], s[i][j]];
+        this.draw();
+    }
+
+    setShape(newShape) {
+        this.currentShape = newShape;
+        this.draw();
+    }
+
+    getBlocks() {
+        const blocks = [];
+        for (let row = 0; row < this.currentShape.length; row++)
+            for (let col = 0; col < this.currentShape[row].length; col++)
+                if (this.currentShape[row][col] === 1)
+                    blocks.push({ x: this.x + col, y: this.y + row });
+        return blocks;
+    }
+
+    getColor() { return this.color; }
+    getType()  { return this.type; }
+
+    destroy() {
+        if (this.graphics) { this.graphics.destroy(); this.graphics = null; }
+    }
+}
+
+// ──────────────── GameBoard ────────────────
+class GameBoard {
+    static BOARD_WIDTH  = 10;
+    static BOARD_HEIGHT = 20;
+    static GRID_SIZE    = 28;
+    static OFFSET_X     = 0;  // set by initBoard
+    static OFFSET_Y     = 0;
+
+    static TETROMINOS = {
+        'I': { shape: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]], color: 0x00ffff },
+        'J': { shape: [[1,0,0],[1,1,1],[0,0,0]],                 color: 0x3399ff },
+        'L': { shape: [[0,0,1],[1,1,1],[0,0,0]],                 color: 0xffa500 },
+        'O': { shape: [[1,1],[1,1]],                              color: 0xffff00 },
+        'S': { shape: [[0,1,1],[1,1,0],[0,0,0]],                 color: 0x44dd44 },
+        'T': { shape: [[0,1,0],[1,1,1],[0,0,0]],                 color: 0xcc44cc },
+        'Z': { shape: [[1,1,0],[0,1,1],[0,0,0]],                 color: 0xff4444 },
+    };
+
+    // 7-bag randomiser
+    static _bag = [];
+    static _refillBag() {
+        GameBoard._bag = Object.keys(GameBoard.TETROMINOS);
+        for (let i = GameBoard._bag.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [GameBoard._bag[i], GameBoard._bag[j]] = [GameBoard._bag[j], GameBoard._bag[i]];
+        }
+    }
+    static getNextFromBag() {
+        if (!GameBoard._bag.length) GameBoard._refillBag();
+        return GameBoard._bag.pop();
+    }
+
+    constructor(scene) {
+        this.scene = scene;
+        this.grid = Array(GameBoard.BOARD_HEIGHT).fill(0).map(() => Array(GameBoard.BOARD_WIDTH).fill(0));
+        this.landedGraphics = [];
+        this.currentTetromino = null;
+        this.nextTetrominoType = GameBoard.getNextFromBag();
+        this.holdTetrominoType = null;
+        this.canHold = true;
+        this.scoreManager = new ScoreManager();
+    }
+
+    initBoard(x, y) {
+        GameBoard.OFFSET_X = x;
+        GameBoard.OFFSET_Y = y;
+
+        const g = this.scene.add.graphics();
+        g.fillStyle(0x000000, 0.6);
+        g.fillRect(x, y,
+            GameBoard.BOARD_WIDTH  * GameBoard.GRID_SIZE,
+            GameBoard.BOARD_HEIGHT * GameBoard.GRID_SIZE);
+
+        g.lineStyle(1, 0x2d3748, 1);
+        for (let i = 0; i <= GameBoard.BOARD_WIDTH; i++) {
+            g.moveTo(x + i * GameBoard.GRID_SIZE, y);
+            g.lineTo(x + i * GameBoard.GRID_SIZE, y + GameBoard.BOARD_HEIGHT * GameBoard.GRID_SIZE);
+        }
+        for (let i = 0; i <= GameBoard.BOARD_HEIGHT; i++) {
+            g.moveTo(x, y + i * GameBoard.GRID_SIZE);
+            g.lineTo(x + GameBoard.BOARD_WIDTH * GameBoard.GRID_SIZE, y + i * GameBoard.GRID_SIZE);
+        }
+        g.strokePath();
+        g.setDepth(0);
+    }
+
+    spawnTetromino() {
+        const type = this.nextTetrominoType;
+        this.nextTetrominoType = GameBoard.getNextFromBag();
+
+        const data  = GameBoard.TETROMINOS[type];
+        const startX = Math.floor((GameBoard.BOARD_WIDTH - data.shape[0].length) / 2);
+
+        this.currentTetromino = new Tetromino(this.scene, startX, 0, type, data.shape, data.color);
+        if (this.checkCollision(this.currentTetromino)) {
+            this.currentTetromino.destroy();
+            this.currentTetromino = null;
+            return null;
+        }
+        this.canHold = true;
+        return this.currentTetromino;
+    }
+
+    getCurrentTetromino() { return this.currentTetromino; }
+
+    checkCollision(t) {
+        for (const { x, y } of t.getBlocks()) {
+            if (x < 0 || x >= GameBoard.BOARD_WIDTH || y >= GameBoard.BOARD_HEIGHT) return true;
+            if (y >= 0 && this.grid[y][x] !== 0) return true;
+        }
+        return false;
+    }
+
+    tryMove(dx, dy) {
+        if (!this.currentTetromino) return false;
+        this.currentTetromino.move(dx, dy);
+        if (this.checkCollision(this.currentTetromino)) {
+            this.currentTetromino.move(-dx, -dy);
+            return false;
+        }
+        return true;
+    }
+
+    _wallKick(t) {
+        const offsets = [{dx:1,dy:0},{dx:-1,dy:0},{dx:2,dy:0},{dx:-2,dy:0},{dx:0,dy:-1}];
+        const ox = t.x, oy = t.y;
+        for (const { dx, dy } of offsets) {
+            t.x = ox + dx; t.y = oy + dy;
+            if (!this.checkCollision(t)) { t.draw(); return true; }
+        }
+        t.x = ox; t.y = oy;
+        return false;
+    }
+
+    tryRotateClockwise() {
+        if (!this.currentTetromino) return false;
+        const savedShape = JSON.parse(JSON.stringify(this.currentTetromino.currentShape));
+        const sx = this.currentTetromino.x, sy = this.currentTetromino.y;
+        this.currentTetromino.rotateClockwise();
+        if (this.checkCollision(this.currentTetromino)) {
+            if (!this._wallKick(this.currentTetromino)) {
+                this.currentTetromino.x = sx; this.currentTetromino.y = sy;
+                this.currentTetromino.setShape(savedShape);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    tryRotateCounterClockwise() {
+        if (!this.currentTetromino) return false;
+        const savedShape = JSON.parse(JSON.stringify(this.currentTetromino.currentShape));
+        const sx = this.currentTetromino.x, sy = this.currentTetromino.y;
+        this.currentTetromino.rotateCounterClockwise();
+        if (this.checkCollision(this.currentTetromino)) {
+            if (!this._wallKick(this.currentTetromino)) {
+                this.currentTetromino.x = sx; this.currentTetromino.y = sy;
+                this.currentTetromino.setShape(savedShape);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    hardDrop() {
+        let n = 0;
+        while (this.tryMove(0, 1)) n++;
+        return n;
+    }
+
+    lockTetromino() {
+        if (!this.currentTetromino) return 0;
+        for (const { x, y } of this.currentTetromino.getBlocks())
+            if (y >= 0) this.grid[y][x] = this.currentTetromino.getColor();
+        this.currentTetromino.destroy();
+        this.currentTetromino = null;
+        const cleared = this._clearFullLines();
+        this.scoreManager.addLines(cleared);
+        this.redrawBoard();
+        return cleared;
+    }
+
+    _clearFullLines() {
+        let count = 0;
+        for (let y = GameBoard.BOARD_HEIGHT - 1; y >= 0; y--) {
+            if (this.grid[y].every(c => c !== 0)) {
+                this.grid.splice(y, 1);
+                this.grid.unshift(Array(GameBoard.BOARD_WIDTH).fill(0));
+                count++;
+                y++; // re-check same index
+            }
+        }
+        return count;
+    }
+
+    redrawBoard() {
+        this.landedGraphics.forEach(g => g.destroy());
+        this.landedGraphics = [];
+        for (let y = 0; y < GameBoard.BOARD_HEIGHT; y++) {
+            for (let x = 0; x < GameBoard.BOARD_WIDTH; x++) {
+                const color = this.grid[y][x];
+                if (color !== 0) {
+                    const g = this.scene.add.graphics();
+                    g.setX(GameBoard.OFFSET_X + x * GameBoard.GRID_SIZE);
+                    g.setY(GameBoard.OFFSET_Y + y * GameBoard.GRID_SIZE);
+                    g.fillStyle(color, 1);
+                    g.fillRect(0, 0, GameBoard.GRID_SIZE - 1, GameBoard.GRID_SIZE - 1);
+                    g.lineStyle(1, 0xffffff, 0.15);
+                    g.strokeRect(0, 0, GameBoard.GRID_SIZE - 1, GameBoard.GRID_SIZE - 1);
+                    g.setDepth(0);
+                    this.landedGraphics.push(g);
+                }
+            }
+        }
+    }
+
+    holdTetromino() {
+        if (!this.currentTetromino || !this.canHold) return;
+        const curType = this.currentTetromino.getType();
+        this.currentTetromino.destroy();
+        this.currentTetromino = null;
+
+        if (this.holdTetrominoType) {
+            const swapType = this.holdTetrominoType;
+            this.holdTetrominoType = curType;
+            const d = GameBoard.TETROMINOS[swapType];
+            const sx = Math.floor((GameBoard.BOARD_WIDTH - d.shape[0].length) / 2);
+            this.currentTetromino = new Tetromino(this.scene, sx, 0, swapType, d.shape, d.color);
+            if (this.checkCollision(this.currentTetromino)) {
+                this.currentTetromino.destroy(); this.currentTetromino = null;
+            }
+        } else {
+            this.holdTetrominoType = curType;
+            this.spawnTetromino();
+        }
+        this.canHold = false;
+    }
+
+    getNextTetrominoType() { return this.nextTetrominoType; }
+    getHoldTetrominoType() { return this.holdTetrominoType; }
+
+    reset() {
+        this.grid = Array(GameBoard.BOARD_HEIGHT).fill(0).map(() => Array(GameBoard.BOARD_WIDTH).fill(0));
+        this.landedGraphics.forEach(g => g.destroy());
+        this.landedGraphics = [];
+        if (this.currentTetromino) { this.currentTetromino.destroy(); this.currentTetromino = null; }
+        this.nextTetrominoType = GameBoard.getNextFromBag();
+        this.holdTetrominoType = null;
+        this.canHold = true;
+        this.scoreManager.reset();
+        GameBoard._bag = [];
+    }
+}
+
+// ──────────────── ScoreManager ────────────────
+class ScoreManager {
+    constructor() { this.reset(); }
+    reset() { this.score = 0; this.level = 1; this.linesCleared = 0; }
+
+    addLines(n) {
+        if (!n) return;
+        this.linesCleared += n;
+        this.level = Math.floor(this.linesCleared / 10) + 1;
+        const pts = [0, 40, 100, 300, 1200];
+        this.score += (pts[n] || 1200) * this.level;
+    }
+    getScore()        { return this.score; }
+    getLevel()        { return this.level; }
+    getLinesCleared() { return this.linesCleared; }
+}
+
+// ──────────────── BootScene ────────────────
+class BootScene extends Phaser.Scene {
+    constructor() { super({ key: 'BootScene' }); }
+    create() { this.scene.start('GameScene'); }
+}
+
+// ──────────────── GameScene ────────────────
+class GameScene extends Phaser.Scene {
+    constructor() {
+        super({ key: 'GameScene' });
+        this.board = null;
+        this.isPaused = false;
+        this.isGameOver = false;
+        this.fallTimer = null;
+        this.ghostGraphics = null;
+    }
+
+    create() {
+        this.isPaused = false;
+        this.isGameOver = false;
+
+        const W = this.sys.game.config.width;
+        const H = this.sys.game.config.height;
+        const boardW = GameBoard.BOARD_WIDTH  * GameBoard.GRID_SIZE;
+        const boardH = GameBoard.BOARD_HEIGHT * GameBoard.GRID_SIZE;
+        const bx = (W - boardW) / 2;
+        const by = (H - boardH) / 2;
+
+        this.board = new GameBoard(this);
+        this.board.initBoard(bx, by);
+
+        this.ghostGraphics = this.add.graphics();
+        this.ghostGraphics.setDepth(0);
+
+        const ok = this.board.spawnTetromino();
+        if (!ok) { this.handleGameOver(); return; }
+
+        this._setupInput();
+        this._startFallTimer();
+        this.updateScoreDisplay();
+
+        // Labels inside canvas
+        this.nextLabel = this.add.text(bx + boardW + 14, by, 'NEXT', { fontSize:'13px', fill:'#718096' });
+        this.holdLabel = this.add.text(bx + boardW + 14, by + 100, 'HOLD', { fontSize:'13px', fill:'#718096' });
+        this.nextPieceText = this.add.text(bx + boardW + 14, by + 18, '', { fontSize:'12px', fill:'#e2e8f0' });
+        this.holdPieceText = this.add.text(bx + boardW + 14, by + 118, '', { fontSize:'12px', fill:'#e2e8f0' });
+
+        this.pauseText = null;
+        this.gameOverGroup = null;
+    }
+
+    _setupInput() {
+        const kb = this.input.keyboard;
+        const cursors = kb.createCursorKeys();
+        const keys = {
+            x: kb.addKey('X'), z: kb.addKey('Z'),
+            c: kb.addKey('C'), p: kb.addKey('P'),
+            h: kb.addKey('H'), r: kb.addKey('R'),
+            space: kb.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+        };
+
+        const guard = () => !this.isPaused && !this.isGameOver && !!this.board.getCurrentTetromino();
+
+        cursors.left.on('down',  () => { if (guard()) this.board.tryMove(-1, 0); });
+        cursors.right.on('down', () => { if (guard()) this.board.tryMove(1, 0); });
+
+        cursors.down.on('down', () => {
+            if (!guard()) return;
+            if (!this.board.tryMove(0, 1)) this._lockAndSpawn();
+        });
+
+        const hardDrop = () => {
+            if (!guard()) return;
+            this.board.hardDrop();
+            this._lockAndSpawn();
+        };
+        keys.space.on('down', hardDrop);
+        cursors.up.on('down', hardDrop);
+
+        keys.x.on('down', () => { if (guard()) this.board.tryRotateClockwise(); });
+        keys.c.on('down', () => { if (guard()) this.board.tryRotateClockwise(); });
+        keys.z.on('down', () => { if (guard()) this.board.tryRotateCounterClockwise(); });
+        keys.p.on('down', () => this._togglePause());
+        keys.h.on('down', () => {
+            if (!guard()) return;
+            this.board.holdTetromino();
+            this._resetFallTimer();
+            this.updateScoreDisplay();
+        });
+        keys.r.on('down', () => {
+            if (this.isGameOver) {
+                this.board.reset();
+                this.scene.restart();
+            }
+        });
+    }
+
+    _calcGhostY() {
+        const t = this.board.getCurrentTetromino();
+        if (!t) return null;
+        let gy = t.y;
+        const origY = t.y;
+        while (true) {
+            t.y++;
+            if (this.board.checkCollision(t)) { t.y--; break; }
+        }
+        const ghostY = t.y;
+        t.y = origY;
+        return { shape: t.currentShape, x: t.x, y: ghostY };
+    }
+
+    _drawGhost() {
+        this.ghostGraphics.clear();
+        const ghost = this._calcGhostY();
+        if (!ghost) return;
+        const t = this.board.getCurrentTetromino();
+        if (ghost.y === t.y) return; // no gap
+
+        this.ghostGraphics.lineStyle(1, 0xffffff, 0.25);
+        for (let row = 0; row < ghost.shape.length; row++) {
+            for (let col = 0; col < ghost.shape[row].length; col++) {
+                if (ghost.shape[row][col] === 1) {
+                    const px = GameBoard.OFFSET_X + (ghost.x + col) * GameBoard.GRID_SIZE;
+                    const py = GameBoard.OFFSET_Y + (ghost.y + row) * GameBoard.GRID_SIZE;
+                    this.ghostGraphics.strokeRect(px, py, GameBoard.GRID_SIZE - 1, GameBoard.GRID_SIZE - 1);
+                }
+            }
+        }
+    }
+
+    _startFallTimer() {
+        if (this.fallTimer) this.fallTimer.remove();
+        const interval = Math.max(80, 1000 - (this.board.scoreManager.getLevel() - 1) * 80);
+        this.fallTimer = this.time.addEvent({
+            delay: interval,
+            callback: () => {
+                if (this.isPaused || this.isGameOver) return;
+                if (!this.board.tryMove(0, 1)) this._lockAndSpawn();
+            },
+            loop: true,
+        });
+    }
+
+    _resetFallTimer() { this._startFallTimer(); }
+
+    _lockAndSpawn() {
+        this.board.lockTetromino();
+        const next = this.board.spawnTetromino();
+        this.updateScoreDisplay();
+        if (!next) { this.handleGameOver(); return; }
+        this._resetFallTimer();
+    }
+
+    _togglePause() {
+        if (this.isGameOver) return;
+        this.isPaused = !this.isPaused;
+        if (this.isPaused) {
+            this.fallTimer.paused = true;
+            if (!this.pauseText)
+                this.pauseText = this.add.text(
+                    this.sys.game.config.width / 2,
+                    this.sys.game.config.height / 2,
+                    'PAUSED\n(P để tiếp tục)',
+                    { fontSize:'36px', fill:'#fff', align:'center' }
+                ).setOrigin(0.5).setDepth(20);
+        } else {
+            this.fallTimer.paused = false;
+            if (this.pauseText) { this.pauseText.destroy(); this.pauseText = null; }
+        }
+    }
+
+    handleGameOver() {
+        this.isGameOver = true;
+        if (this.fallTimer) this.fallTimer.remove();
+        const cx = this.sys.game.config.width / 2;
+        const cy = this.sys.game.config.height / 2;
+        this.add.text(cx, cy - 40, 'GAME OVER', { fontSize:'52px', fill:'#ff4444', fontStyle:'bold' }).setOrigin(0.5).setDepth(20);
+        this.add.text(cx, cy + 20, `Điểm: ${this.board.scoreManager.getScore()}`, { fontSize:'28px', fill:'#fff' }).setOrigin(0.5).setDepth(20);
+        this.add.text(cx, cy + 60, 'Nhấn R để chơi lại', { fontSize:'22px', fill:'#a0aec0' }).setOrigin(0.5).setDepth(20);
+    }
+
+    updateScoreDisplay() {
+        const sm = this.board.scoreManager;
+        document.getElementById('current-score').innerText = sm.getScore();
+        document.getElementById('current-level').innerText = sm.getLevel();
+        document.getElementById('current-lines').innerText = sm.getLinesCleared();
+        if (this.nextPieceText) this.nextPieceText.setText(this.board.getNextTetrominoType() || '-');
+        if (this.holdPieceText) this.holdPieceText.setText(this.board.getHoldTetrominoType() || '-');
+    }
+
+    update() {
+        if (!this.isPaused && !this.isGameOver) this._drawGhost();
+    }
+}
+
+// ──────────────── Khởi động Phaser ────────────────
+const config = {
+    type: Phaser.AUTO,
+    width: 420,
+    height: 600,
+    parent: 'phaser-game',
+    backgroundColor: '#0f1117',
+    scene: [BootScene, GameScene],
+};
+new Phaser.Game(config);
+</script>
+</body>
+</html>
