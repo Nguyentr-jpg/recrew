@@ -177,7 +177,19 @@ with st.sidebar:
     st.markdown("### 📊 Thống kê")
     if "task_count" not in st.session_state:
         st.session_state.task_count = 0
+    if "last_result" not in st.session_state:
+        st.session_state.last_result = None
+    if "last_code" not in st.session_state:
+        st.session_state.last_code = None
+    if "last_code_type" not in st.session_state:
+        st.session_state.last_code_type = None
+    if "last_task" not in st.session_state:
+        st.session_state.last_task = None
+    if "revision_count" not in st.session_state:
+        st.session_state.revision_count = 0
     st.metric("Task đã xử lý", st.session_state.task_count)
+    if st.session_state.revision_count > 0:
+        st.metric("Lần sửa lại", st.session_state.revision_count)
 
     st.markdown("---")
     st.markdown("### 🤖 Chọn Model")
@@ -606,6 +618,13 @@ if chay and task_input and api_key:
                 st.success("✅ Tải file `result.py` → chạy bằng `python result.py`!")
             st.info("📁 File cũng đã lưu tại thư mục `output/`")
 
+        # Lưu kết quả vào session_state để dùng cho feedback loop
+        st.session_state.last_result = result_text
+        st.session_state.last_code = game_html or py_code
+        st.session_state.last_code_type = "html" if game_html else ("python" if py_code else None)
+        st.session_state.last_task = task_input
+        st.session_state.revision_count = 0
+
     except Exception as e:
         err_msg = str(e)
         if "404" in err_msg or "not found" in err_msg.lower():
@@ -634,6 +653,232 @@ elif chay and not task_input:
     st.warning("⚠️ Vui lòng nhập task trước khi chạy!")
 elif chay and not api_key:
     st.error("❌ Vui lòng nhập API Key ở thanh bên trái!")
+
+# ─────────────────────────────────────────
+# VÒNG LẶP PHẢN HỒI — trao đổi với team để sửa lại
+# ─────────────────────────────────────────
+if st.session_state.get("last_result") and not st.session_state.get("is_running"):
+    st.markdown("---")
+    rev_count = st.session_state.get("revision_count", 0)
+    st.markdown("### 💬 Phản hồi với team")
+    if rev_count > 0:
+        st.caption(f"✏️ Đã sửa {rev_count} lần. Bạn có thể tiếp tục phản hồi thêm.")
+    else:
+        st.caption(
+            "Chưa hài lòng hoặc phát hiện lỗi? "
+            "Nhập phản hồi — Developer sẽ nhận **code cũ + phản hồi của bạn** và sửa lại."
+        )
+
+    fb_col, btn_col = st.columns([4, 1])
+    with fb_col:
+        feedback_text = st.text_area(
+            "Phản hồi",
+            placeholder=(
+                "Mô tả lỗi hoặc thay đổi cần làm...\n"
+                "VD: Nút Start không hoạt động / Thêm tính năng pause / Snake đi quá nhanh"
+            ),
+            height=110,
+            key="feedback_text",
+            label_visibility="collapsed"
+        )
+    with btn_col:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        sua_lai = st.button(
+            "🔄 Team sửa lại",
+            type="primary",
+            key="btn_sua_lai",
+            disabled=not api_key,
+            use_container_width=True
+        )
+
+    if sua_lai and not feedback_text:
+        st.warning("⚠️ Vui lòng nhập phản hồi trước!")
+
+    elif sua_lai and feedback_text and api_key:
+        st.session_state.is_running = True
+
+        st.markdown("---")
+        st.markdown("### 🔧 Developer đang đọc phản hồi và sửa...")
+
+        rev_progress = st.progress(0)
+        rev_status   = st.empty()
+        rev_log_box  = st.empty()
+        rev_logs     = []
+
+        def add_rev_log(msg):
+            rev_logs.append(msg)
+            rev_log_box.markdown(
+                '<div class="log-box">' + "<br>".join(rev_logs[-15:]) + "</div>",
+                unsafe_allow_html=True
+            )
+
+        try:
+            rev_status.markdown("⚙️ Khởi tạo AI...")
+            rev_progress.progress(10)
+            os.environ["GEMINI_API_KEY"] = api_key
+            os.environ["GOOGLE_API_KEY"] = api_key
+            llm = LLM(model=selected_model, api_key=api_key)
+
+            developer = create_developer(llm)
+            reviewer  = create_reviewer(llm)
+            team_lead = create_team_lead(llm)
+
+            add_rev_log("✅ Developer, Reviewer, Team Lead đã online")
+
+            prev_code  = st.session_state.last_code  or "(chưa có code cụ thể)"
+            prev_task  = st.session_state.last_task  or ""
+            code_type  = st.session_state.last_code_type or "html"
+
+            rev_status.markdown("🔧 Developer đang đọc feedback và sửa code...")
+            rev_progress.progress(25)
+            add_rev_log(f"📋 Task gốc: {prev_task[:80]}...")
+            add_rev_log(f"💬 Phản hồi: {feedback_text[:80]}...")
+
+            task_sua = Task(
+                description=f"""
+                Bạn đã viết code cho task: "{prev_task}"
+
+                === CODE HIỆN TẠI ===
+                ```{code_type}
+                {prev_code}
+                ```
+
+                === PHẢN HỒI CỦA USER ===
+                {feedback_text}
+
+                === NHIỆM VỤ ===
+                1. Đọc kỹ phản hồi — xác định chính xác vấn đề cần sửa
+                2. Sửa code để giải quyết đúng vấn đề đó
+                3. Giữ nguyên các phần khác đang hoạt động tốt
+                4. Output: CODE HOÀN CHỈNH ĐÃ SỬA trong 1 code block (không chỉ đoạn sửa)
+                5. Sau code block: viết "Đã thay đổi: ..." tóm tắt 2-3 điểm
+                """,
+                expected_output="Code hoàn chỉnh đã sửa trong 1 code block + tóm tắt thay đổi",
+                agent=developer
+            )
+
+            task_review_sua = Task(
+                description="""
+                Review nhanh code vừa được sửa:
+                - Phần được sửa có giải quyết đúng vấn đề từ phản hồi không?
+                - Sửa này có gây ra bug mới không?
+                - Nếu cần chỉnh thêm: nêu cụ thể điều gì
+                """,
+                expected_output="Nhận xét ngắn: fix OK hay cần chỉnh thêm gì",
+                agent=reviewer,
+                context=[task_sua]
+            )
+
+            task_present_sua = Task(
+                description="""
+                Trình bày kết quả sửa lỗi. Format BẮT BUỘC:
+
+                ## 🔧 Đã sửa theo phản hồi
+
+                ### Thay đổi
+                [Mô tả ngắn gọn những gì đã được sửa]
+
+                ### 💻 Code cập nhật
+                [COPY NGUYÊN XI toàn bộ code đã sửa từ Developer — KHÔNG rút gọn]
+
+                ### Nhận xét Reviewer
+                [1-2 câu kết quả review]
+                """,
+                expected_output="Báo cáo theo format trên với code đầy đủ không rút gọn",
+                agent=team_lead,
+                context=[task_sua, task_review_sua]
+            )
+
+            rev_status.markdown("👥 Reviewer kiểm tra, Team Lead tổng hợp...")
+            rev_progress.progress(50)
+            add_rev_log("👀 Reviewer đang kiểm tra fix...")
+            add_rev_log("📝 Team Lead đang tổng hợp kết quả...")
+
+            rev_crew = Crew(
+                agents=[developer, reviewer, team_lead],
+                tasks=[task_sua, task_review_sua, task_present_sua],
+                verbose=False
+            )
+
+            ket_qua_sua = rev_crew.kickoff()
+
+            rev_progress.progress(100)
+            rev_status.markdown("✅ **Sửa xong!**")
+            add_rev_log("✅ Hoàn thành sửa lỗi!")
+
+            new_result = str(ket_qua_sua)
+
+            # Lấy thêm code trực tiếp từ developer task
+            dev_rev_raw = ""
+            try:
+                t_out = rev_crew.tasks[0].output
+                dev_rev_raw = str(t_out.raw) if hasattr(t_out, "raw") and t_out.raw else str(t_out)
+            except Exception:
+                pass
+
+            new_game_html = _extract_game_html(new_result) or _extract_game_html(dev_rev_raw)
+            new_py_code   = None
+            if not new_game_html:
+                py_blocks = re.findall(r'```(?:python|py)\n(.*?)\n```', new_result + "\n" + dev_rev_raw, re.DOTALL)
+                if py_blocks:
+                    new_py_code = py_blocks[0]
+
+            # Lưu file
+            os.makedirs("output", exist_ok=True)
+            if new_game_html:
+                with open("output/result.html", "w", encoding="utf-8") as f:
+                    f.write(new_game_html)
+            elif new_py_code:
+                with open("output/result.py", "w", encoding="utf-8") as f:
+                    f.write(new_py_code)
+
+            # Cập nhật session_state
+            st.session_state.last_result    = new_result
+            st.session_state.last_code      = new_game_html or new_py_code
+            st.session_state.last_code_type = "html" if new_game_html else ("python" if new_py_code else code_type)
+            st.session_state.revision_count = st.session_state.get("revision_count", 0) + 1
+
+            # Hiển thị kết quả sửa
+            st.markdown("---")
+            st.markdown(f"### ✅ Kết quả sau khi sửa (lần {st.session_state.revision_count})")
+
+            if new_game_html:
+                tab_r2, tab_g2, tab_dl2 = st.tabs(["📄 Báo cáo", "▶️ Chạy ngay", "💾 Tải về"])
+                with tab_g2:
+                    st.info("💡 Game/App đã được cập nhật. Nhấn vào để tương tác.")
+                    import streamlit.components.v1 as components
+                    components.html(new_game_html, height=650, scrolling=False)
+            else:
+                tab_r2, tab_dl2 = st.tabs(["📄 Báo cáo", "💾 Tải về"])
+
+            with tab_r2:
+                st.markdown(new_result)
+
+            with tab_dl2:
+                if new_game_html:
+                    st.download_button(
+                        "⬇️ Tải HTML đã sửa",
+                        data=new_game_html,
+                        file_name=f"result_v{st.session_state.revision_count}.html",
+                        mime="text/html"
+                    )
+                    st.success("✅ Mở file HTML bằng trình duyệt là chạy được ngay!")
+                elif new_py_code:
+                    st.download_button(
+                        "⬇️ Tải Python đã sửa",
+                        data=new_py_code,
+                        file_name=f"result_v{st.session_state.revision_count}.py",
+                        mime="text/plain"
+                    )
+                st.info("📁 File đã lưu tại thư mục `output/`")
+
+        except Exception as e:
+            err_msg = str(e)
+            st.error(f"❌ Lỗi khi sửa: {err_msg[:300]}")
+            add_rev_log(f"❌ Lỗi: {err_msg}")
+
+        finally:
+            st.session_state.is_running = False
 
 # ─────────────────────────────────────────
 # DEMO GAME  (inline – không phụ thuộc file ngoài)
