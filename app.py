@@ -158,6 +158,34 @@ st.markdown("""
     /* Đảm bảo sidebar và toggle luôn hiển thị dù CSS nào khác can thiệp */
     [data-testid="stSidebar"] { visibility: visible !important; }
     [data-testid="collapsedControl"] { visibility: visible !important; }
+
+    /* ── Sidebar toggle: tab dễ bấm ở cạnh trái ── */
+    /* Nút ">" khi sidebar đang đóng */
+    [data-testid="collapsedControl"] button {
+        background: linear-gradient(135deg, #667eea, #764ba2) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 0 10px 10px 0 !important;
+        width: 28px !important;
+        height: 56px !important;
+        box-shadow: 3px 0 12px rgba(102,126,234,0.5) !important;
+        transition: width 0.2s, box-shadow 0.2s !important;
+    }
+    [data-testid="collapsedControl"] button:hover {
+        width: 36px !important;
+        box-shadow: 4px 0 18px rgba(102,126,234,0.8) !important;
+    }
+    /* Nút "<" bên trong sidebar khi đang mở */
+    [data-testid="stSidebarCollapseButton"] button,
+    [data-testid="stSidebar"] [data-testid="collapsedControl"] button {
+        background: linear-gradient(135deg, #667eea, #764ba2) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px 0 0 10px !important;
+        width: 28px !important;
+        height: 56px !important;
+        box-shadow: -3px 0 12px rgba(102,126,234,0.5) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
